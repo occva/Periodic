@@ -3,8 +3,8 @@ set -euo pipefail
 
 MODE="${1:-run}"
 case "$MODE" in
-  run|--debug|--logs|--telemetry|--verify) ;;
-  *) echo "usage: $0 [--debug|--logs|--telemetry|--verify]" >&2; exit 2 ;;
+  run|--debug|--logs|--telemetry|--verify|--sample-data) ;;
+  *) echo "usage: $0 [--debug|--logs|--telemetry|--verify|--sample-data]" >&2; exit 2 ;;
 esac
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -58,5 +58,8 @@ case "$MODE" in
     done
     echo "Build succeeded, but $APP_NAME did not stay running." >&2
     exit 1
+    ;;
+  --sample-data)
+    /usr/bin/open -n "$APP_BUNDLE" --args -store-in-memory -seed-test-data
     ;;
 esac

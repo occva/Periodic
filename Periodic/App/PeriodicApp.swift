@@ -8,9 +8,12 @@ struct PeriodicApp: App {
         WindowGroup(AppConfiguration.displayName, id: AppConfiguration.mainWindowID) {
             ContentView()
                 .environment(services)
+                .environment(\.appleIconCache, services.appleIconCache)
                 .modifier(AppearanceModifier())
+                .modifier(LocalizationModifier())
+                .modifier(CurrencyDisplayModifier())
         }
-        .defaultSize(width: 1100, height: 720)
+        .defaultSize(width: 1280, height: 800)
         .windowResizability(.contentMinSize)
         .commands {
             AppCommands()
@@ -20,7 +23,10 @@ struct PeriodicApp: App {
         Settings {
             SettingsView()
                 .environment(services)
+                .environment(\.appleIconCache, services.appleIconCache)
                 .modifier(AppearanceModifier())
+                .modifier(LocalizationModifier())
+                .modifier(CurrencyDisplayModifier())
         }
         .windowResizability(.contentSize)
     }

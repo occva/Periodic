@@ -1,0 +1,29 @@
+{
+  "catalogVersion": "1.1.0",
+  "entries": [
+    { "key": "builtin.apple-music", "name": "Apple Music", "aliases": ["苹果音乐"], "category": "media", "symbolName": "music.note", "iconResourceName": "apple-music.jpg", "suggestedBillingKind": "recurring", "suggestedCycleMonths": 1, "currency": "CNY" },
+    { "key": "builtin.apple-icloud", "name": "Apple iCloud", "aliases": ["iCloud", "苹果云"], "category": "tools", "symbolName": "icloud", "suggestedBillingKind": "recurring", "suggestedCycleMonths": 1, "currency": "CNY" },
+    { "key": "builtin.bilibili", "name": "哔哩哔哩", "aliases": ["Bilibili", "B站"], "category": "media", "symbolName": "play.rectangle", "iconResourceName": "bilibili.jpg", "suggestedBillingKind": "recurring", "suggestedCycleMonths": 1, "currency": "CNY" },
+    { "key": "builtin.chatgpt", "name": "ChatGPT", "aliases": ["OpenAI"], "category": "tools", "symbolName": "bubble.left.and.text.bubble.right", "iconResourceName": "chatgpt.jpg", "suggestedBillingKind": "recurring", "suggestedCycleMonths": 1, "currency": "USD" },
+    { "key": "builtin.disney-plus", "name": "Disney+", "aliases": ["Disney Plus"], "category": "media", "symbolName": "sparkles.tv", "iconResourceName": "disney-plus.jpg", "suggestedBillingKind": "recurring", "suggestedCycleMonths": 1, "currency": "USD" },
+    { "key": "builtin.hbo", "name": "HBO", "aliases": ["Max"], "category": "media", "symbolName": "tv", "iconResourceName": "hbo.jpg", "suggestedBillingKind": "recurring", "suggestedCycleMonths": 1, "currency": "USD" },
+    { "key": "builtin.iqiyi", "name": "爱奇艺", "aliases": ["iQIYI"], "category": "media", "symbolName": "play.tv", "iconResourceName": "iqiyi.jpg", "suggestedBillingKind": "recurring", "suggestedCycleMonths": 1, "currency": "CNY" },
+    { "key": "builtin.jd-plus", "name": "京东 Plus", "aliases": ["京东PLUS会员"], "category": "household", "symbolName": "shippingbox", "iconResourceName": "jd-plus.jpg", "suggestedBillingKind": "recurring", "suggestedCycleMonths": 12, "currency": "CNY" },
+    { "key": "builtin.mango-tv", "name": "芒果 TV", "aliases": ["芒果TV"], "category": "media", "symbolName": "play.tv", "iconResourceName": "mango-tv.jpg", "suggestedBillingKind": "recurring", "suggestedCycleMonths": 1, "currency": "CNY" },
+    { "key": "builtin.medium", "name": "Medium", "aliases": [], "category": "workStudy", "symbolName": "doc.richtext", "iconResourceName": "medium.jpg", "suggestedBillingKind": "recurring", "suggestedCycleMonths": 1, "currency": "USD" },
+    { "key": "builtin.microsoft-365", "name": "Microsoft 365", "aliases": ["Office 365"], "category": "workStudy", "symbolName": "square.grid.2x2", "iconResourceName": "microsoft-365.jpg", "suggestedBillingKind": "recurring", "suggestedCycleMonths": 12, "currency": "CNY" },
+    { "key": "builtin.netflix", "name": "Netflix", "aliases": ["奈飞"], "category": "media", "symbolName": "film", "iconResourceName": "netflix.jpg", "suggestedBillingKind": "recurring", "suggestedCycleMonths": 1, "currency": "USD" },
+    { "key": "builtin.notion", "name": "Notion", "aliases": [], "category": "workStudy", "symbolName": "doc.text", "iconResourceName": "notion.jpg", "suggestedBillingKind": "recurring", "suggestedCycleMonths": 1, "currency": "USD" },
+    { "key": "builtin.playstation", "name": "PlayStation", "aliases": ["PS Plus"], "category": "media", "symbolName": "gamecontroller", "iconResourceName": "playstation.jpg", "suggestedBillingKind": "recurring", "suggestedCycleMonths": 12, "currency": "CNY" },
+    { "key": "builtin.qq-music", "name": "QQ 音乐", "aliases": ["QQ音乐"], "category": "media", "symbolName": "music.note", "iconResourceName": "qq-music.jpg", "suggestedBillingKind": "recurring", "suggestedCycleMonths": 1, "currency": "CNY" },
+    { "key": "builtin.readwise", "name": "Readwise", "aliases": [], "category": "workStudy", "symbolName": "text.book.closed", "iconResourceName": "readwise.jpg", "suggestedBillingKind": "recurring", "suggestedCycleMonths": 1, "currency": "USD" },
+    { "key": "builtin.setapp", "name": "Setapp", "aliases": [], "category": "tools", "symbolName": "app.badge", "suggestedBillingKind": "recurring", "suggestedCycleMonths": 1, "currency": "USD" },
+    { "key": "builtin.sketch", "name": "Sketch", "aliases": [], "category": "tools", "symbolName": "diamond", "iconResourceName": "sketch.jpg", "suggestedBillingKind": "recurring", "suggestedCycleMonths": 12, "currency": "USD" },
+    { "key": "builtin.spotify", "name": "Spotify", "aliases": [], "category": "media", "symbolName": "music.note.list", "iconResourceName": "spotify.jpg", "suggestedBillingKind": "recurring", "suggestedCycleMonths": 1, "currency": "USD" },
+    { "key": "builtin.tencent-video", "name": "腾讯视频", "aliases": ["Tencent Video"], "category": "media", "symbolName": "play.rectangle", "iconResourceName": "tencent-video.jpg", "suggestedBillingKind": "recurring", "suggestedCycleMonths": 1, "currency": "CNY" },
+    { "key": "builtin.xmind", "name": "XMind", "aliases": [], "category": "workStudy", "symbolName": "brain.head.profile", "iconResourceName": "xmind.jpg", "suggestedBillingKind": "recurring", "suggestedCycleMonths": 12, "currency": "USD" },
+    { "key": "builtin.youtube", "name": "YouTube", "aliases": ["YouTube Premium"], "category": "media", "symbolName": "play.rectangle.fill", "iconResourceName": "youtube.jpg", "suggestedBillingKind": "recurring", "suggestedCycleMonths": 1, "currency": "USD" },
+    { "key": "builtin.zhihu", "name": "知乎盐选", "aliases": ["知乎"], "category": "workStudy", "symbolName": "questionmark.bubble", "iconResourceName": "zhihu.jpg", "suggestedBillingKind": "recurring", "suggestedCycleMonths": 1, "currency": "CNY" },
+    { "key": "builtin.china-unicom", "name": "联通宽带", "aliases": ["中国联通"], "category": "communication", "symbolName": "wifi", "iconResourceName": "china-unicom.jpg", "suggestedBillingKind": "recurring", "suggestedCycleMonths": 12, "currency": "CNY" }
+  ]
+}

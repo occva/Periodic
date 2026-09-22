@@ -9,9 +9,9 @@ enum AppAppearance: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .system: "跟随系统"
-        case .light: "浅色"
-        case .dark: "深色"
+        case .system: AppLocalization.string("跟随系统")
+        case .light: AppLocalization.string("浅色")
+        case .dark: AppLocalization.string("深色")
         }
     }
 
