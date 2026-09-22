@@ -1,7 +1,7 @@
 import XCTest
 
 @MainActor
-final class AppShellUITests: XCTestCase {
+final class PeriodicUITests: XCTestCase {
     func testMainWindowAndSettings() {
         continueAfterFailure = false
         let app = XCUIApplication()

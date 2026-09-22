@@ -1,7 +1,7 @@
 # 1. Tab1 表格总览实现
 
 > 版本：1.2｜日期：2026-09-22｜状态：待实现的详细设计。
-> 产品依据：[需求文档](../requirement.md)。当前 AppShell 仍是基础框架，本文不表示业务代码已完成。
+> 产品依据：[需求文档](../requirement.md)。当前 Periodic 仍是基础框架，本文不表示业务代码已完成。
 
 本模块覆盖订阅表格、快捷视图与分组、服务模板库、搜索筛选、详情、新增编辑、图标、周期续费、终生购买、付款历史及删除。按「需求 → 功能 → 数据库 → 表 → 字段 → 接口 → 实现 → 验收」展开，共享业务能力也在本文定义。
 
@@ -250,7 +250,7 @@
 
 ### 3.3 文件、迁移及恢复边界
 
-正式接入时使用 `Application Support/AppShell/Datasets/<datasetID>/default.store`，图片放同目录 `Assets/`，由 `active-dataset.json` 指向当前数据集；Tab3 规定整体恢复切换流程。当前骨架只预留 `AppShell/default.store`，尚无业务记录；如发现非空未知旧库，应报错并保留，不自动覆盖。
+正式接入时使用 `Application Support/Periodic/Datasets/<datasetID>/default.store`，图片放同目录 `Assets/`，由 `active-dataset.json` 指向当前数据集；Tab3 规定整体恢复切换流程。当前骨架只预留 `Periodic/default.store`，尚无业务记录；如发现非空未知旧库，应报错并保留，不自动覆盖。
 
 图片先写为不可变文件，再在数据库事务中登记和引用，提交后回收旧孤立资源。数据库与文件、系统通知不是一个事务。备份期间保留资产读取租约，避免引用中的文件被并发清理。
 
@@ -617,7 +617,7 @@ apply 只更新当前订阅，preview 显示类型转换、当前日期、价格
 
 | 现有位置 / 建议新增位置 | 职责 |
 | --- | --- |
-| App/AppShellApp、Models/AppDestination、Views/DetailView | 启动数据集、注册三个导航值、加载/错误/维护状态 |
+| App/PeriodicApp、Models/AppDestination、Views/DetailView | 启动数据集、注册三个导航值、加载/错误/维护状态 |
 | App/AppCommands、Views/ContentView | focused scene 命令、WindowSession、单一 Sheet 路由 |
 | Stores/PersistenceController、Stores/Schema、Stores/StoreActor | 复用容器工厂，定义 V1、迁移及事务入口 |
 | Models/Subscription、Models/Payment、Models/LocalDate、Models/Money | 领域 DTO 和纯规则输入输出 |

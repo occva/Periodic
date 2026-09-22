@@ -8,8 +8,8 @@ case "$MODE" in
 esac
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APP_NAME="AppShell"
-BUNDLE_ID="local.lhg.AppShell"
+APP_NAME="Periodic"
+BUNDLE_ID="local.lhg.Periodic"
 DERIVED_DATA="$PROJECT_ROOT/build/DerivedData"
 APP_BUNDLE="$DERIVED_DATA/Build/Products/Debug/$APP_NAME.app"
 APP_BINARY="$APP_BUNDLE/Contents/MacOS/$APP_NAME"
@@ -19,8 +19,8 @@ cd "$PROJECT_ROOT"
 pkill -x "$APP_NAME" >/dev/null 2>&1 || true
 
 xcodebuild -quiet \
-  -project "$PROJECT_ROOT/AppShell.xcodeproj" \
-  -scheme AppShell \
+  -project "$PROJECT_ROOT/Periodic.xcodeproj" \
+  -scheme Periodic \
   -configuration Debug \
   -destination "platform=macOS,arch=$(uname -m)" \
   -derivedDataPath "$DERIVED_DATA" \

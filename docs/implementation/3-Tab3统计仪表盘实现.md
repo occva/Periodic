@@ -1,7 +1,7 @@
 # 3. Tab3 统计仪表盘实现
 
 > 版本：1.2｜日期：2026-09-22｜状态：待实现的详细设计。
-> 产品依据：[需求文档](../requirement.md)。当前 AppShell 尚未实现本模块。
+> 产品依据：[需求文档](../requirement.md)。当前 Periodic 尚未实现本模块。
 
 本文覆盖统计 Tab 的需求、功能、数据库、字段、接口、实现及验收，并将设置、CSV 和完整备份恢复作为相关公共能力写在同一文档中。设置仍使用独立 Settings 窗口，不增加第四个主 Tab。
 
@@ -403,7 +403,7 @@ RestorePlan 绑定当前 SnapshotVersion、包摘要和候选摘要。预览后�
 数据集结构为：
 
 ```text
-Application Support/AppShell/
+Application Support/Periodic/
   active-dataset.json                 # 活动指针：formatVersion、datasetID
   Datasets/<datasetID>/
     default.store                    # SwiftData 管理及其 sidecar

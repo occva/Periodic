@@ -1,7 +1,7 @@
 import SwiftUI
 
 @main
-struct AppShellApp: App {
+struct PeriodicApp: App {
     @State private var services = AppServices()
 
     var body: some Scene {

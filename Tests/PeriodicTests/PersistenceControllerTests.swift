@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
 import Testing
-@testable import AppShell
+@testable import Periodic
 
 @MainActor
 struct PersistenceControllerTests {

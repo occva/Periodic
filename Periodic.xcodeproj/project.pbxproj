@@ -12,32 +12,32 @@
 			containerPortal = 98F54143AB4E86B28C3AFEE0 /* Project object */;
 			proxyType = 1;
 			remoteGlobalIDString = 05E4F3D3DF1F72D77F2F121D;
-			remoteInfo = AppShell;
+			remoteInfo = Periodic;
 		};
 		E529FEF9E3DFD484D216A7FD /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 98F54143AB4E86B28C3AFEE0 /* Project object */;
 			proxyType = 1;
 			remoteGlobalIDString = 05E4F3D3DF1F72D77F2F121D;
-			remoteInfo = AppShell;
+			remoteInfo = Periodic;
 		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		2923ECD26F4C86D9F67EA938 /* AppShellTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AppShellTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		68A6B97DC9C569A506558D64 /* AppShellUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AppShellUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		2923ECD26F4C86D9F67EA938 /* PeriodicTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PeriodicTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		68A6B97DC9C569A506558D64 /* PeriodicUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PeriodicUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		7810FACD1A7F55E5BD9A24EB /* Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
-		9D96675E1AE8F147742B656F /* AppShell.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AppShell.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		E7B1BFA482251F04722B6837 /* AppShell.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = AppShell.entitlements; sourceTree = "<group>"; };
+		9D96675E1AE8F147742B656F /* Periodic.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Periodic.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		E7B1BFA482251F04722B6837 /* Periodic.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Periodic.entitlements; sourceTree = "<group>"; };
 		E91A5C65C2B08EF01D2456AF /* Base.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Base.xcconfig; sourceTree = "<group>"; };
 		E9E907FEF44498EF7DE7F1F7 /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
 		F3398FD130625A7200AFF8C1 /* AGENTS.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = AGENTS.md; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		119C44536C59FD2DC605EB12 /* AppShellUITests */ = {
+		119C44536C59FD2DC605EB12 /* PeriodicUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = AppShellUITests;
+			path = PeriodicUITests;
 			sourceTree = "<group>";
 		};
 		630A3E12678C4AB4BD0D2C24 /* docs */ = {
@@ -45,14 +45,14 @@
 			path = docs;
 			sourceTree = "<group>";
 		};
-		69F8D45498D7E20DA99BB780 /* AppShell */ = {
+		69F8D45498D7E20DA99BB780 /* Periodic */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = AppShell;
+			path = Periodic;
 			sourceTree = "<group>";
 		};
-		C25149068875BE014F61F0BA /* AppShellTests */ = {
+		C25149068875BE014F61F0BA /* PeriodicTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = AppShellTests;
+			path = PeriodicTests;
 			sourceTree = "<group>";
 		};
 		DEA965F38A223E375FD24638 /* script */ = {
@@ -90,9 +90,9 @@
 		328EC33DF3954DC9B83FA285 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				9D96675E1AE8F147742B656F /* AppShell.app */,
-				2923ECD26F4C86D9F67EA938 /* AppShellTests.xctest */,
-				68A6B97DC9C569A506558D64 /* AppShellUITests.xctest */,
+				9D96675E1AE8F147742B656F /* Periodic.app */,
+				2923ECD26F4C86D9F67EA938 /* PeriodicTests.xctest */,
+				68A6B97DC9C569A506558D64 /* PeriodicUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -100,8 +100,8 @@
 		68DE481A39400A49757EB7B7 /* Tests */ = {
 			isa = PBXGroup;
 			children = (
-				C25149068875BE014F61F0BA /* AppShellTests */,
-				119C44536C59FD2DC605EB12 /* AppShellUITests */,
+				C25149068875BE014F61F0BA /* PeriodicTests */,
+				119C44536C59FD2DC605EB12 /* PeriodicUITests */,
 			);
 			path = Tests;
 			sourceTree = "<group>";
@@ -112,7 +112,7 @@
 				E91A5C65C2B08EF01D2456AF /* Base.xcconfig */,
 				7810FACD1A7F55E5BD9A24EB /* Debug.xcconfig */,
 				E9E907FEF44498EF7DE7F1F7 /* Release.xcconfig */,
-				E7B1BFA482251F04722B6837 /* AppShell.entitlements */,
+				E7B1BFA482251F04722B6837 /* Periodic.entitlements */,
 			);
 			path = Configurations;
 			sourceTree = "<group>";
@@ -121,7 +121,7 @@
 			isa = PBXGroup;
 			children = (
 				F3398FD130625A7200AFF8C1 /* AGENTS.md */,
-				69F8D45498D7E20DA99BB780 /* AppShell */,
+				69F8D45498D7E20DA99BB780 /* Periodic */,
 				68DE481A39400A49757EB7B7 /* Tests */,
 				8C3CAE929B92155BEC14CDAB /* Configurations */,
 				630A3E12678C4AB4BD0D2C24 /* docs */,
@@ -133,9 +133,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		05E4F3D3DF1F72D77F2F121D /* AppShell */ = {
+		05E4F3D3DF1F72D77F2F121D /* Periodic */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 1C47D0E44F655DBD23E59F3B /* Build configuration list for PBXNativeTarget "AppShell" */;
+			buildConfigurationList = 1C47D0E44F655DBD23E59F3B /* Build configuration list for PBXNativeTarget "Periodic" */;
 			buildPhases = (
 				9DED0C37C4539D038095FFA0 /* Sources */,
 				C1B8EA486BC25E03D1B4E980 /* Frameworks */,
@@ -146,16 +146,16 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				69F8D45498D7E20DA99BB780 /* AppShell */,
+				69F8D45498D7E20DA99BB780 /* Periodic */,
 			);
-			name = AppShell;
-			productName = AppShell;
-			productReference = 9D96675E1AE8F147742B656F /* AppShell.app */;
+			name = Periodic;
+			productName = Periodic;
+			productReference = 9D96675E1AE8F147742B656F /* Periodic.app */;
 			productType = "com.apple.product-type.application";
 		};
-		87FB7CC519CCF464BF951BF8 /* AppShellTests */ = {
+		87FB7CC519CCF464BF951BF8 /* PeriodicTests */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = D957C8AE37340C1DF98321F5 /* Build configuration list for PBXNativeTarget "AppShellTests" */;
+			buildConfigurationList = D957C8AE37340C1DF98321F5 /* Build configuration list for PBXNativeTarget "PeriodicTests" */;
 			buildPhases = (
 				E1123199FB105FBE88B93A6D /* Sources */,
 				C537B0F7AB811FE57B19E4ED /* Frameworks */,
@@ -167,16 +167,16 @@
 				B133D8F8280EF5F277C69369 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
-				C25149068875BE014F61F0BA /* AppShellTests */,
+				C25149068875BE014F61F0BA /* PeriodicTests */,
 			);
-			name = AppShellTests;
-			productName = AppShellTests;
-			productReference = 2923ECD26F4C86D9F67EA938 /* AppShellTests.xctest */;
+			name = PeriodicTests;
+			productName = PeriodicTests;
+			productReference = 2923ECD26F4C86D9F67EA938 /* PeriodicTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
-		F65689D75FA2EFD924182645 /* AppShellUITests */ = {
+		F65689D75FA2EFD924182645 /* PeriodicUITests */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 36205DFAC5D9F469709AAE98 /* Build configuration list for PBXNativeTarget "AppShellUITests" */;
+			buildConfigurationList = 36205DFAC5D9F469709AAE98 /* Build configuration list for PBXNativeTarget "PeriodicUITests" */;
 			buildPhases = (
 				BD1C29153B674268AC06800B /* Sources */,
 				384C7CF1CEBF7A50DB8892D8 /* Frameworks */,
@@ -188,11 +188,11 @@
 				DC5CE38216A4F6C0EFB29661 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
-				119C44536C59FD2DC605EB12 /* AppShellUITests */,
+				119C44536C59FD2DC605EB12 /* PeriodicUITests */,
 			);
-			name = AppShellUITests;
-			productName = AppShellUITests;
-			productReference = 68A6B97DC9C569A506558D64 /* AppShellUITests.xctest */;
+			name = PeriodicUITests;
+			productName = PeriodicUITests;
+			productReference = 68A6B97DC9C569A506558D64 /* PeriodicUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
 /* End PBXNativeTarget section */
@@ -217,7 +217,7 @@
 					};
 				};
 			};
-			buildConfigurationList = 49EA05A46B1A86EA7E413B43 /* Build configuration list for PBXProject "AppShell" */;
+			buildConfigurationList = 49EA05A46B1A86EA7E413B43 /* Build configuration list for PBXProject "Periodic" */;
 			developmentRegion = "zh-Hans";
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -231,9 +231,9 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				05E4F3D3DF1F72D77F2F121D /* AppShell */,
-				87FB7CC519CCF464BF951BF8 /* AppShellTests */,
-				F65689D75FA2EFD924182645 /* AppShellUITests */,
+				05E4F3D3DF1F72D77F2F121D /* Periodic */,
+				87FB7CC519CCF464BF951BF8 /* PeriodicTests */,
+				F65689D75FA2EFD924182645 /* PeriodicUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -289,12 +289,12 @@
 /* Begin PBXTargetDependency section */
 		B133D8F8280EF5F277C69369 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 05E4F3D3DF1F72D77F2F121D /* AppShell */;
+			target = 05E4F3D3DF1F72D77F2F121D /* Periodic */;
 			targetProxy = E529FEF9E3DFD484D216A7FD /* PBXContainerItemProxy */;
 		};
 		DC5CE38216A4F6C0EFB29661 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 05E4F3D3DF1F72D77F2F121D /* AppShell */;
+			target = 05E4F3D3DF1F72D77F2F121D /* Periodic */;
 			targetProxy = 58E5F1BE588E423C93EC9D46 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
@@ -310,10 +310,10 @@
 					"@executable_path/../Frameworks",
 					"@loader_path/../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = local.lhg.AppShellTests;
+				PRODUCT_BUNDLE_IDENTIFIER = local.lhg.PeriodicTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AppShell.app/Contents/MacOS/AppShell";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Periodic.app/Contents/MacOS/Periodic";
 			};
 			name = Release;
 		};
@@ -327,22 +327,23 @@
 					"@executable_path/../Frameworks",
 					"@loader_path/../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = local.lhg.AppShellTests;
+				PRODUCT_BUNDLE_IDENTIFIER = local.lhg.PeriodicTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AppShell.app/Contents/MacOS/AppShell";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Periodic.app/Contents/MacOS/Periodic";
 			};
 			name = Debug;
 		};
 		6303D8845D5B33AEAE2DA39D /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = Configurations/AppShell.entitlements;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Configurations/Periodic.entitlements;
 				COMBINE_HIDPI_IMAGES = YES;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = AppShell;
+				INFOPLIST_KEY_CFBundleDisplayName = Periodic;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -350,7 +351,7 @@
 					"@executable_path/../Frameworks",
 					"@loader_path/../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = local.lhg.AppShell;
+				PRODUCT_BUNDLE_IDENTIFIER = local.lhg.Periodic;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 			};
 			name = Debug;
@@ -371,10 +372,10 @@
 					"@executable_path/../Frameworks",
 					"@loader_path/../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = local.lhg.AppShellUITests;
+				PRODUCT_BUNDLE_IDENTIFIER = local.lhg.PeriodicUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
-				TEST_TARGET_NAME = AppShell;
+				TEST_TARGET_NAME = Periodic;
 			};
 			name = Debug;
 		};
@@ -387,22 +388,23 @@
 					"@executable_path/../Frameworks",
 					"@loader_path/../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = local.lhg.AppShellUITests;
+				PRODUCT_BUNDLE_IDENTIFIER = local.lhg.PeriodicUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
-				TEST_TARGET_NAME = AppShell;
+				TEST_TARGET_NAME = Periodic;
 			};
 			name = Release;
 		};
 		C64B1274727699AC712405C1 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = Configurations/AppShell.entitlements;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Configurations/Periodic.entitlements;
 				COMBINE_HIDPI_IMAGES = YES;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = AppShell;
+				INFOPLIST_KEY_CFBundleDisplayName = Periodic;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -410,7 +412,7 @@
 					"@executable_path/../Frameworks",
 					"@loader_path/../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = local.lhg.AppShell;
+				PRODUCT_BUNDLE_IDENTIFIER = local.lhg.Periodic;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 			};
 			name = Release;
@@ -425,7 +427,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		1C47D0E44F655DBD23E59F3B /* Build configuration list for PBXNativeTarget "AppShell" */ = {
+		1C47D0E44F655DBD23E59F3B /* Build configuration list for PBXNativeTarget "Periodic" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				6303D8845D5B33AEAE2DA39D /* Debug */,
@@ -434,7 +436,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		36205DFAC5D9F469709AAE98 /* Build configuration list for PBXNativeTarget "AppShellUITests" */ = {
+		36205DFAC5D9F469709AAE98 /* Build configuration list for PBXNativeTarget "PeriodicUITests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				900BE4550EC3D7C34918FACF /* Debug */,
@@ -443,7 +445,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		49EA05A46B1A86EA7E413B43 /* Build configuration list for PBXProject "AppShell" */ = {
+		49EA05A46B1A86EA7E413B43 /* Build configuration list for PBXProject "Periodic" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				89E1FD6268CC0F221A2BE178 /* Debug */,
@@ -452,7 +454,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		D957C8AE37340C1DF98321F5 /* Build configuration list for PBXNativeTarget "AppShellTests" */ = {
+		D957C8AE37340C1DF98321F5 /* Build configuration list for PBXNativeTarget "PeriodicTests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				294721494ACF2C4E0C6C306A /* Debug */,
