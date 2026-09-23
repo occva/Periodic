@@ -12,6 +12,7 @@ final class AppServices {
     let templateCategoryStore: TemplateCategoryStore?
     let appleIconSearch: AppleIconSearchClient
     let appleIconCache: AppleIconCache
+    let exchangeRates: FrankfurterExchangeRateClient
     let builtinTemplateCategoryStore: BuiltinTemplateCategoryStore?
     let builtinTemplates: BuiltinTemplateCatalog?
     let modelContainer: ModelContainer?
@@ -28,6 +29,7 @@ final class AppServices {
         self.persistence = persistence
         appleIconSearch = AppleIconSearchClient()
         appleIconCache = AppleIconCache()
+        exchangeRates = FrankfurterExchangeRateClient()
         do {
             builtinTemplates = try BuiltinTemplateCatalog.load()
         } catch {

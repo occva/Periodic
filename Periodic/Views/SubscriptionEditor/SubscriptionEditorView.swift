@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SubscriptionEditorView: View {
     @Environment(\.dismiss) private var dismiss
+    @AppStorage(PreferenceKey.selectedCurrencies) private var selectedCurrenciesRaw = ""
 
     let subscription: SubscriptionDTO?
     let preset: SubscriptionTemplatePreset?
@@ -145,7 +146,10 @@ struct SubscriptionEditorView: View {
                                 .accessibilityIdentifier("subscription-amount")
 
                             Picker("币种", selection: $currency) {
-                                ForEach(CurrencyCode.allCases) { currency in
+                                ForEach(CurrencyPreferences.availableCurrencies(
+                                    from: selectedCurrenciesRaw,
+                                    including: currency
+                                )) { currency in
                                     Text(currency.rawValue).tag(currency)
                                 }
                             }

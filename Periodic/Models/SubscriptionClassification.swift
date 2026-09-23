@@ -63,18 +63,50 @@ enum ServiceCategory: String, CaseIterable, Identifiable, Codable, Sendable {
     }
 }
 
-enum CurrencyCode: String, CaseIterable, Identifiable, Codable, Sendable {
-    case cny = "CNY"
-    case usd = "USD"
-    case jpy = "JPY"
-    case kwd = "KWD"
+struct CurrencyCode: RawRepresentable, Hashable, Identifiable, Codable, Sendable {
+    let rawValue: String
+
+    init?(rawValue: String) {
+        let normalized = rawValue.uppercased()
+        guard normalized.utf8.count == 3,
+              normalized.utf8.allSatisfy({ (65...90).contains($0) }) else {
+            return nil
+        }
+        self.rawValue = normalized
+    }
+
+    private init(_ rawValue: String) {
+        self.rawValue = rawValue
+    }
+
+    static let cny = CurrencyCode("CNY")
+    static let usd = CurrencyCode("USD")
+    static let jpy = CurrencyCode("JPY")
+    static let kwd = CurrencyCode("KWD")
+    static let allCases: [CurrencyCode] = [.cny, .usd, .jpy, .kwd]
 
     var id: String { rawValue }
     var scale: Int {
-        switch self {
-        case .jpy: 0
-        case .kwd: 3
-        case .cny, .usd: 2
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .currency
+        formatter.currencyCode = rawValue
+        return formatter.maximumFractionDigits
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let value = try container.decode(String.self)
+        guard let currency = CurrencyCode(rawValue: value) else {
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Invalid ISO currency code: \(value)"
+            )
         }
+        self = currency
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
     }
 }

@@ -60,4 +60,9 @@ enum AppPreferenceValues {
             ? .symbol
             : .code
     }
+
+    static var exchangeRateBaseCurrency: CurrencyCode {
+        let rawValue = UserDefaults.standard.string(forKey: PreferenceKey.exchangeRateBaseCurrency)
+        return rawValue.flatMap(CurrencyCode.init(rawValue:)) ?? .cny
+    }
 }

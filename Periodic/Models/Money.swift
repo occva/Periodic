@@ -93,6 +93,10 @@ struct Money: Hashable, Codable, Sendable {
         style.format(formattedDecimal(amount, scale: currency.scale), currency: currency)
     }
 
+    static func displayNumber(_ amount: Decimal, currency: CurrencyCode) -> String {
+        formattedDecimal(amount, scale: currency.scale)
+    }
+
     private var decimalValue: Decimal {
         Decimal(minorUnits) / decimalPower(currency.scale)
     }

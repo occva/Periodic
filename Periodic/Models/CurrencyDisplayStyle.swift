@@ -39,19 +39,18 @@ enum CurrencyDisplayStyle: String, CaseIterable, Identifiable, Codable, Sendable
 
 extension CurrencyCode {
     var symbol: String {
-        switch self {
-        case .cny: "¥"
-        case .usd: "$"
-        case .jpy: "¥"
-        case .kwd: "د.ك"
-        }
+        if self == .cny || self == .jpy { return "¥" }
+        if self == .usd { return "$" }
+        if self == .kwd { return "د.ك" }
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .currency
+        formatter.currencyCode = rawValue
+        return formatter.currencySymbol ?? rawValue
     }
 
     var symbolQualifier: String? {
-        switch self {
-        case .cny: AppLocalization.string("人民币")
-        case .jpy: AppLocalization.string("日元")
-        case .usd, .kwd: nil
-        }
+        if self == .cny { return AppLocalization.string("人民币") }
+        if self == .jpy { return AppLocalization.string("日元") }
+        return nil
     }
 }

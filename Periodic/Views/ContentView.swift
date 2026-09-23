@@ -2,11 +2,18 @@ import SwiftUI
 
 struct ContentView: View {
     @Environment(AppServices.self) private var services
+    @Environment(AppWindowRouter.self) private var windowRouter
     @Environment(\.scenePhase) private var scenePhase
+    @SceneStorage("window.instanceID") private var windowIDText = UUID().uuidString
     @SceneStorage("window.destination") private var destinationID = AppDestination.dashboard.rawValue
     @SceneStorage("window.sidebarVisible") private var sidebarVisible = true
     @State private var session = WindowSession()
     @State private var pendingTemplatePreset: SubscriptionTemplatePreset?
+    @State private var pendingWindowRoute: MainWindowRoute?
+
+    private var windowID: UUID {
+        UUID(uuidString: windowIDText) ?? UUID()
+    }
 
     private var selection: Binding<AppDestination?> {
         Binding(
@@ -30,6 +37,10 @@ struct ContentView: View {
             DetailView(destination: selection.wrappedValue ?? .dashboard, session: session)
         }
         .frame(minWidth: 960, minHeight: 640)
+        .background {
+            WindowRegistrationView(windowID: windowID, router: windowRouter)
+                .frame(width: 0, height: 0)
+        }
         .focusedSceneValue(
             \.createSubscriptionAction,
             CreateSubscriptionAction {
@@ -141,11 +152,16 @@ struct ContentView: View {
                 session.loadError = PresentedError(error, title: "无法准备订阅数据")
             }
             await session.reload(using: services)
+            applyPendingWindowRoute()
         }
         .onChange(of: services.subscriptionDataVersion) { _, _ in
             Task { @MainActor in
                 await session.reload(using: services)
+                applyPendingWindowRoute()
             }
+        }
+        .onChange(of: windowRouter.routeRevision) { _, _ in
+            receiveWindowRoute()
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
@@ -169,17 +185,63 @@ struct ContentView: View {
         )
         .onAppear {
             AppLog.lifecycle.info("Main window appeared")
+            receiveWindowRoute()
+        }
+    }
+
+    private func receiveWindowRoute() {
+        guard let route = windowRouter.consumeRoute(for: windowID) else { return }
+        pendingWindowRoute = route
+        applyPendingWindowRoute()
+    }
+
+    private func applyPendingWindowRoute() {
+        guard let route = pendingWindowRoute else { return }
+        switch route {
+        case .dashboard(let dueHorizon):
+            destinationID = AppDestination.dashboard.rawValue
+            if let dueHorizon {
+                session.dueHorizon = dueHorizon
+            }
+            pendingWindowRoute = nil
+        case .subscriptionDetails(let id):
+            destinationID = AppDestination.overview.rawValue
+            if session.tryPresentDetails(for: id) {
+                pendingWindowRoute = nil
+            } else if session.hasLoadedSubscriptions {
+                pendingWindowRoute = nil
+                session.loadError = PresentedError(
+                    ContentViewError.subscriptionNotFound,
+                    title: "无法打开订阅"
+                )
+            }
+        case .newSubscription:
+            destinationID = AppDestination.dashboard.rawValue
+            session.presentNewSubscription()
+            pendingWindowRoute = nil
+        case .templateLibrary:
+            destinationID = AppDestination.templates.rawValue
+            pendingWindowRoute = nil
         }
     }
 }
 
 private enum ContentViewError: LocalizedError {
     case storeUnavailable
+    case subscriptionNotFound
 
-    var errorDescription: String? { "订阅数据库尚未就绪。" }
+    var errorDescription: String? {
+        switch self {
+        case .storeUnavailable:
+            "订阅数据库尚未就绪。"
+        case .subscriptionNotFound:
+            "该订阅已被删除或不再存在。菜单栏将在下次更新后移除它。"
+        }
+    }
 }
 
 #Preview {
     ContentView()
         .environment(AppServices())
+        .environment(AppWindowRouter())
 }

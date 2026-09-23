@@ -22,7 +22,7 @@ enum TimelineRange: Int, CaseIterable, Identifiable {
     }
 }
 
-enum DueHorizon: Int, CaseIterable, Identifiable {
+enum DueHorizon: Int, CaseIterable, Identifiable, Sendable {
     case sevenDays = 7
     case fifteenDays = 15
     case thirtyDays = 30

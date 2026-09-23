@@ -27,6 +27,7 @@ final class WindowSession {
     private(set) var subscriptions: [SubscriptionDTO] = []
     private(set) var items: [SubscriptionListItem] = []
     private(set) var isLoading = false
+    private(set) var hasLoadedSubscriptions = false
     var loadError: PresentedError?
 
     init(referenceDate: LocalDate = .today) {
@@ -118,9 +119,15 @@ final class WindowSession {
     }
 
     func presentDetails(for id: UUID) {
-        guard subscriptions.contains(where: { $0.id == id }) else { return }
+        _ = tryPresentDetails(for: id)
+    }
+
+    @discardableResult
+    func tryPresentDetails(for id: UUID) -> Bool {
+        guard subscriptions.contains(where: { $0.id == id }) else { return false }
         detailSubscriptionID = id
         isPresentingSubscriptionDetail = true
+        return true
     }
 
     func dismissDetails() {
@@ -155,6 +162,7 @@ final class WindowSession {
     func reload(using services: AppServices) async {
         guard let store = services.subscriptionStore else {
             loadError = services.initializationError
+            hasLoadedSubscriptions = true
             return
         }
 
@@ -168,6 +176,7 @@ final class WindowSession {
         } catch {
             loadError = PresentedError(error, title: "无法读取订阅")
         }
+        hasLoadedSubscriptions = true
     }
 
     private func matchesSearch(_ item: SubscriptionListItem) -> Bool {

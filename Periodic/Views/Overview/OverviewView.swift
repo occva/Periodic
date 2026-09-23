@@ -3,6 +3,7 @@ import SwiftUI
 struct OverviewView: View {
     @Bindable var session: WindowSession
     @Environment(\.currencyDisplayStyle) private var currencyDisplayStyle
+    @AppStorage(PreferenceKey.selectedCurrencies) private var selectedCurrenciesRaw = ""
     @State private var selection = Set<SubscriptionListItem.ID>()
 
     private var items: [SubscriptionListItem] { session.filteredItems }
@@ -221,7 +222,10 @@ struct OverviewView: View {
                 }
                 Picker("币种", selection: $session.overviewCurrency) {
                     Text("全部币种").tag(nil as CurrencyCode?)
-                    ForEach(CurrencyCode.allCases) { currency in
+                    ForEach(CurrencyPreferences.availableCurrencies(
+                        from: selectedCurrenciesRaw,
+                        including: session.overviewCurrency
+                    )) { currency in
                         Text(currency.rawValue).tag(Optional(currency))
                     }
                 }

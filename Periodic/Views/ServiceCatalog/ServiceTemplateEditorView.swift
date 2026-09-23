@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ServiceTemplateEditorView: View {
     @Environment(\.dismiss) private var dismiss
+    @AppStorage(PreferenceKey.selectedCurrencies) private var selectedCurrenciesRaw = ""
 
     let template: ServiceTemplateDTO?
     let customCategories: [TemplateCategoryDTO]
@@ -113,7 +114,10 @@ struct ServiceTemplateEditorView: View {
                             .multilineTextAlignment(.trailing)
                             .frame(width: 150)
                         Picker("币种", selection: $currency) {
-                            ForEach(CurrencyCode.allCases) { value in
+                            ForEach(CurrencyPreferences.availableCurrencies(
+                                from: selectedCurrenciesRaw,
+                                including: currency
+                            )) { value in
                                 Text(value.rawValue).tag(value)
                             }
                         }

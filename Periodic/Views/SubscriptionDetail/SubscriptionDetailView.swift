@@ -3,6 +3,7 @@ import SwiftUI
 struct SubscriptionDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.currencyDisplayStyle) private var currencyDisplayStyle
+    @AppStorage(PreferenceKey.selectedCurrencies) private var selectedCurrenciesRaw = ""
 
     let subscription: SubscriptionDTO
     let onEditSubscription: @MainActor () -> Void
@@ -206,7 +207,10 @@ struct SubscriptionDetailView: View {
                                 "币种",
                                 selection: draftBinding(\.currency, fallback: .cny)
                             ) {
-                                ForEach(CurrencyCode.allCases) { currency in
+                                ForEach(CurrencyPreferences.availableCurrencies(
+                                    from: selectedCurrenciesRaw,
+                                    including: periodDraft?.currency
+                                )) { currency in
                                     Text(currency.rawValue).tag(currency)
                                 }
                             }

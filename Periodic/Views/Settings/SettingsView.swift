@@ -5,8 +5,11 @@ struct SettingsView: View {
         TabView {
             GeneralSettingsView()
                 .tabItem { Label("通用", systemImage: "gearshape") }
+
+            ExchangeRateSettingsView()
+                .tabItem { Label("汇率", systemImage: "arrow.left.arrow.right") }
         }
-        .frame(width: 500, height: 390)
+        .frame(width: 640, height: 560)
         .onAppear {
             AppLog.lifecycle.info("Settings window appeared")
         }
@@ -15,4 +18,5 @@ struct SettingsView: View {
 
 #Preview {
     SettingsView()
+        .environment(AppServices(inMemory: true))
 }
