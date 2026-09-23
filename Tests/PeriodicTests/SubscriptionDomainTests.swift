@@ -150,7 +150,44 @@ struct SubscriptionDomainTests {
         let records = try await reopenedStore.fetchAll()
         #expect(records.map(\.id) == [input.id])
         #expect(records.first?.billingKind == .lifetime)
-        #expect(try await reopenedStore.fetchPeriods(for: input.id).count == 1)
+        let periods = try await reopenedStore.fetchPeriods(for: input.id)
+        #expect(periods.count == 1)
+        #expect(periods.first?.start == input.periodStart)
+        #expect(periods.first?.end == .defaultLifetimeHistoryEnd)
+    }
+
+    @MainActor
+    @Test func existingLifetimeSubscriptionWithoutHistoryIsBackfilled() async throws {
+        let controller = PersistenceController()
+        let container = try controller.makeContainer(
+            schema: Schema([SubscriptionRecord.self, SubscriptionPeriodRecord.self]),
+            inMemory: true
+        )
+        let subscriptionID = UUID()
+        let input = SubscriptionCreateInput(
+            id: subscriptionID,
+            name: "Existing Lifetime",
+            symbolName: "infinity",
+            iconResourceName: nil,
+            iconURLString: nil,
+            category: .tools,
+            managementState: .active,
+            billingKind: .lifetime,
+            periodStart: nil,
+            expiry: nil,
+            cycleMonths: nil,
+            money: try Money.parse("99", currency: .cny),
+            note: "",
+            reminderEnabled: false
+        )
+        container.mainContext.insert(SubscriptionRecord(input: input))
+        try container.mainContext.save()
+        let store = SubscriptionStore(modelContainer: container)
+
+        #expect(try await store.backfillLifetimePeriods() == 1)
+        #expect(try await store.backfillLifetimePeriods() == 0)
+        let period = try #require(try await store.fetchPeriods(for: subscriptionID).first)
+        #expect(period.end == .defaultLifetimeHistoryEnd)
     }
 
     @MainActor
@@ -213,11 +250,16 @@ struct SubscriptionDomainTests {
     @Test func customTemplateCategoryPersistsAndDeletionMovesTemplatesToOther() async throws {
         let controller = PersistenceController()
         let container = try controller.makeContainer(
-            schema: Schema([ServiceTemplateRecord.self, TemplateCategoryRecord.self]),
+            schema: Schema([
+                ServiceTemplateRecord.self,
+                TemplateCategoryRecord.self,
+                BuiltinTemplateCategoryAssignmentRecord.self,
+            ]),
             inMemory: true
         )
         let categoryStore = TemplateCategoryStore(modelContainer: container)
         let templateStore = TemplateStore(modelContainer: container)
+        let builtinCategoryStore = BuiltinTemplateCategoryStore(modelContainer: container)
         let categoryID = UUID()
 
         try await categoryStore.save(
@@ -243,6 +285,10 @@ struct SubscriptionDomainTests {
                 currency: .cny
             )
         )
+        try await builtinCategoryStore.assign(
+            .custom(categoryID),
+            toBuiltinTemplate: "chatgpt"
+        )
 
         try await categoryStore.delete(id: categoryID, expectedRevision: category.revision)
         #expect(try await categoryStore.fetchAll().isEmpty)
@@ -250,6 +296,10 @@ struct SubscriptionDomainTests {
         #expect(template.customCategoryID == nil)
         #expect(template.category == .other)
         #expect(template.revision == 2)
+        #expect(
+            try await builtinCategoryStore.fetchAssignments()["chatgpt"]
+                == .builtin(.other)
+        )
     }
 
     @Test func missingIconPlaceholderIsStableForAServiceName() {

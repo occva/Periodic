@@ -74,6 +74,17 @@ struct SubscriptionListItem: Identifiable, Hashable, Sendable {
         return min(max(Double(remaining) / Double(totalDayCount), 0), 1)
     }
 
+    func remainingDaysProgress(
+        relativeTo referenceDate: LocalDate,
+        fullScaleDays: Int = 100
+    ) -> Double? {
+        guard fullScaleDays > 0,
+              let remainingDays = remainingDayCount(relativeTo: referenceDate) else {
+            return nil
+        }
+        return min(max(Double(remainingDays) / Double(fullScaleDays), 0), 1)
+    }
+
     var expiryStatus: String {
         expiryStatus(relativeTo: .today)
     }

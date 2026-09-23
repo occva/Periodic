@@ -28,6 +28,7 @@ struct DetailView: View {
         }
         .navigationTitle(destination.title)
         .toolbar {
+            ToolbarSpacer(.fixed, placement: .primaryAction)
             ToolbarItem(placement: .primaryAction) {
                 SettingsLink {
                     Label("设置", systemImage: "gearshape")

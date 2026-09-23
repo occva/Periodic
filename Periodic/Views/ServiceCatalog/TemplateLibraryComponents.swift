@@ -7,10 +7,9 @@ struct TemplateLibrarySidebar: View {
     let builtinTemplates: [ServiceTemplateDTO]
     let userTemplates: [ServiceTemplateDTO]
     let customCategories: [TemplateCategoryDTO]
-    let onAddCategory: () -> Void
     let onEditCategory: (TemplateCategoryDTO) -> Void
     let onDeleteCategory: (TemplateCategoryDTO) -> Void
-    let onAddTemplate: () -> Void
+    let onMoveTemplate: (String, TemplateLibrarySelection) -> Bool
 
     var body: some View {
         List(selection: $selection) {
@@ -53,7 +52,7 @@ struct TemplateLibrarySidebar: View {
                     sidebarRow(
                         title: category.name,
                         symbol: "folder",
-                        count: userTemplates.count { $0.customCategoryID == category.id },
+                        count: allTemplates.count { $0.customCategoryID == category.id },
                         selection: .customCategory(category.id)
                     )
                     .contextMenu {
@@ -62,13 +61,6 @@ struct TemplateLibrarySidebar: View {
                     }
                 }
 
-                Button("添加分类", systemImage: "folder.badge.plus", action: onAddCategory)
-                    .buttonStyle(.plain)
-            }
-
-            Section("维护") {
-                Button("新建我的模板", systemImage: "plus", action: onAddTemplate)
-                    .buttonStyle(.plain)
             }
         }
         .listStyle(.sidebar)
@@ -89,58 +81,13 @@ struct TemplateLibrarySidebar: View {
                 .foregroundStyle(.secondary)
         }
         .tag(selection)
-    }
-}
-
-struct TemplateLibraryHeader: View {
-    let title: String
-    @Binding var searchText: String
-    let showsCloseButton: Bool
-    let onAddCategory: () -> Void
-    let onAddTemplate: () -> Void
-    let onClose: () -> Void
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Text(title)
-                .font(.title2.weight(.semibold))
-            Spacer()
-            TextField("搜索模板名称或别名", text: $searchText)
-                .textFieldStyle(.roundedBorder)
-                .frame(width: 280)
-            Button("添加分类", systemImage: "folder.badge.plus", action: onAddCategory)
-                .labelStyle(.iconOnly)
-                .buttonStyle(.glass)
-            Button("新建我的模板", systemImage: "plus", action: onAddTemplate)
-                .labelStyle(.iconOnly)
-                .buttonStyle(.glassProminent)
-            if showsCloseButton {
-                Button("关闭", systemImage: "xmark", action: onClose)
-                    .labelStyle(.iconOnly)
-                    .buttonStyle(.glass)
+        .dropDestination(for: String.self) { templateIDs, _ in
+            guard selection.categoryAssignment != nil,
+                  let templateID = templateIDs.first else {
+                return false
             }
+            return onMoveTemplate(templateID, selection)
         }
-        .padding(.horizontal, 16)
-        .frame(height: 52)
-        .accessibilityIdentifier("template-library-header")
-    }
-}
-
-struct TemplateLibraryControls: View {
-    @Binding var groupByCategory: Bool
-    let templateCount: Int
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Toggle("按分类分组", isOn: $groupByCategory)
-                .toggleStyle(.button)
-            Spacer()
-            Text("\(templateCount) 个模板")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
     }
 }
 
@@ -148,12 +95,21 @@ struct TemplateLibraryCard: View {
     let template: ServiceTemplateDTO
     let categoryTitle: String
     let sourceTitle: String
+    let draggableID: String?
     let onSelect: () -> Void
     let onCopy: () -> Void
     let onEdit: () -> Void
     let onDelete: () -> Void
 
     var body: some View {
+        if let draggableID {
+            card.draggable(draggableID)
+        } else {
+            card
+        }
+    }
+
+    private var card: some View {
         Button(action: onSelect) {
             HStack(spacing: 10) {
                 ServiceIconView(
@@ -172,12 +128,17 @@ struct TemplateLibraryCard: View {
                         .lineLimit(1)
                 }
                 Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
             }
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(.rect(cornerRadius: 14))
         }
         .buttonStyle(.plain)
+        .help("使用“\(template.name)”新建订阅")
+        .accessibilityLabel("使用“\(template.name)”新建订阅")
         .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 14))
         .contextMenu {
             if template.source == .builtin {

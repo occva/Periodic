@@ -26,7 +26,6 @@ struct DashboardView: View {
             }
             .padding(20)
         }
-        .toolbar { toolbarContent }
         .accessibilityIdentifier("dashboard-page")
     }
 
@@ -210,28 +209,9 @@ struct DashboardView: View {
                             }
                         }
                         .padding(10)
-                        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 10))
                     }
                 }
             }
-        }
-    }
-
-    @ToolbarContentBuilder
-    private var toolbarContent: some ToolbarContent {
-        ToolbarItemGroup(placement: .primaryAction) {
-            Menu {
-                Button("从服务模板新建") {
-                    session.presentTemplateLibrary()
-                }
-                Button("空白新建") {
-                    session.presentNewSubscription()
-                }
-            } label: {
-                Label("新建", systemImage: "plus")
-            }
-            Button("刷新", systemImage: "arrow.clockwise") {}
-                .disabled(true)
         }
     }
 

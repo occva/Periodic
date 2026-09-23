@@ -8,8 +8,6 @@ struct TimelineView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            timelineControls
-            Divider()
             TimelineGridView(
                 items: session.datedItems,
                 centerDate: centerDate,
@@ -21,7 +19,6 @@ struct TimelineView: View {
             Divider()
             upcomingSection
         }
-        .searchable(text: $session.searchText, placement: .toolbar, prompt: "搜索订阅名称")
         .toolbar { toolbarContent }
         .sheet(item: $specialCollection) { collection in
             TimelineCollectionListView(
@@ -32,41 +29,6 @@ struct TimelineView: View {
             )
         }
         .accessibilityIdentifier("timeline-page")
-    }
-
-    private var timelineControls: some View {
-        HStack(spacing: 8) {
-            Button("前一范围", systemImage: "chevron.left") { shiftRange(by: -1) }
-                .labelStyle(.iconOnly)
-            Button("今天") { centerDate = Date() }
-            Button("后一范围", systemImage: "chevron.right") { shiftRange(by: 1) }
-                .labelStyle(.iconOnly)
-
-            Text("时间范围")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize()
-            Picker("时间范围", selection: $session.timelineRange) {
-                ForEach(TimelineRange.allCases) { range in
-                    Text(range.title).tag(range)
-                }
-            }
-            .labelsHidden()
-            .pickerStyle(.segmented)
-            .frame(width: 390)
-
-            Spacer(minLength: 12)
-            Button("无日期 \(session.undatedCount)") {
-                specialCollection = .undated
-            }
-                .disabled(session.undatedCount == 0)
-            Button("终生 \(session.lifetimeCount)") {
-                specialCollection = .lifetime
-            }
-                .disabled(session.lifetimeCount == 0)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
     }
 
     private var upcomingSection: some View {
@@ -91,7 +53,7 @@ struct TimelineView: View {
                     systemImage: "checkmark.circle",
                     description: Text("未来 \(session.dueHorizon.rawValue) 天内的项目会显示在这里。")
                 )
-                .frame(minHeight: 104)
+                .frame(maxWidth: .infinity, minHeight: 104)
             } else {
                 ScrollView(.horizontal) {
                     GlassEffectContainer(spacing: 10) {
@@ -178,6 +140,41 @@ struct TimelineView: View {
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
+        ToolbarItemGroup(placement: .navigation) {
+            Button("前一范围", systemImage: "chevron.left") { shiftRange(by: -1) }
+                .labelStyle(.iconOnly)
+            Button("今天") { centerDate = Date() }
+            Button("后一范围", systemImage: "chevron.right") { shiftRange(by: 1) }
+                .labelStyle(.iconOnly)
+        }
+
+        ToolbarSpacer(.fixed, placement: .navigation)
+
+        ToolbarItem(placement: .navigation) {
+            Picker("时间范围", selection: $session.timelineRange) {
+                ForEach(TimelineRange.allCases) { range in
+                    Text(range.title).tag(range)
+                }
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 320)
+        }
+
+        ToolbarItem(placement: .secondaryAction) {
+            Menu {
+                Button("无日期 \(session.undatedCount)") {
+                    specialCollection = .undated
+                }
+                .disabled(session.undatedCount == 0)
+                Button("终生 \(session.lifetimeCount)") {
+                    specialCollection = .lifetime
+                }
+                .disabled(session.lifetimeCount == 0)
+            } label: {
+                Label("特殊项目", systemImage: "tray.full")
+            }
+        }
+
         ToolbarItemGroup(placement: .primaryAction) {
             Menu {
                 Picker("服务类型", selection: $session.timelineCategory) {
@@ -218,6 +215,11 @@ struct TimelineView: View {
             } label: {
                 Label("新建", systemImage: "plus")
             }
+
+            ToolbarSearchButton(
+                text: $session.searchText,
+                prompt: "搜索订阅名称"
+            )
         }
     }
 

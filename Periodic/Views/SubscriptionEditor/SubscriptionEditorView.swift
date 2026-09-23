@@ -101,9 +101,13 @@ struct SubscriptionEditorView: View {
                                 iconURLString = nil
                             }
                         }
-                        Button("从 Apple 搜索…") { isPresentingIconPicker = true }
+                        LocalIconPickerButton { reference in
+                            iconResourceName = nil
+                            iconURLString = reference
+                        }
+                        Button("Apple 搜索…") { isPresentingIconPicker = true }
+                            .accessibilityIdentifier("search-apple-icon")
                     }
-                    .accessibilityLabel(iconDescription)
                 }
 
                 Section("计费与价格") {
@@ -212,12 +216,6 @@ struct SubscriptionEditorView: View {
                 iconURLString = reference
             }
         }
-    }
-
-    private var iconDescription: String {
-        if iconResourceName != nil { return "使用内置品牌图标" }
-        if iconURLString != nil { return "使用 Apple App Store 图标" }
-        return "未设置品牌图标"
     }
 
     private func save() {

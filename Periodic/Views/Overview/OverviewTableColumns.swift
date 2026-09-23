@@ -98,11 +98,12 @@ private struct RemainingDurationCell: View {
             Text(item.remainingDayCount(relativeTo: referenceDate).map(String.init) ?? "—")
                 .frame(minWidth: 28, alignment: .trailing)
                 .monospacedDigit()
-            if let progress = item.remainingProgress(relativeTo: referenceDate) {
+            if let progress = item.remainingDaysProgress(relativeTo: referenceDate) {
                 ProgressView(value: progress)
                     .progressViewStyle(.linear)
                     .tint(progress > 0 ? .green : .secondary)
                     .frame(width: 100)
+                    .help("按 100 天刻度显示剩余时间")
             }
         }
     }

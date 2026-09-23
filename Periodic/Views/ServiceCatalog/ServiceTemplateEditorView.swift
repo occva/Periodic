@@ -79,9 +79,13 @@ struct ServiceTemplateEditorView: View {
                             iconURLString = nil
                         }
                     }
-                    Button("从 Apple 搜索…") { isPresentingIconPicker = true }
+                    LocalIconPickerButton { reference in
+                        iconResourceName = nil
+                        iconURLString = reference
+                    }
+                    Button("Apple 搜索…") { isPresentingIconPicker = true }
+                        .accessibilityIdentifier("search-apple-icon")
                 }
-                .accessibilityLabel(iconDescription)
             }
 
             Section("建议计费") {
@@ -147,12 +151,6 @@ struct ServiceTemplateEditorView: View {
     private var navigationTitle: String {
         guard let template else { return "新建我的模板" }
         return template.source == .builtin ? "复制为我的模板" : "编辑我的模板"
-    }
-
-    private var iconDescription: String {
-        if iconResourceName != nil { return "使用内置品牌图标" }
-        if iconURLString != nil { return "已选择 Apple App Store 图标" }
-        return "尚未设置品牌图标，将使用自动占位图标"
     }
 
     private func save() {

@@ -22,6 +22,7 @@ final class WindowSession {
     private(set) var isPresentingSubscriptionDetail = false
     private(set) var isPresentingTemplateLibrary = false
     private(set) var editingSubscriptionID: UUID?
+    private(set) var subscriptionEditorPreset: SubscriptionTemplatePreset?
     private(set) var detailSubscriptionID: UUID?
     private(set) var subscriptions: [SubscriptionDTO] = []
     private(set) var items: [SubscriptionListItem] = []
@@ -94,8 +95,9 @@ final class WindowSession {
         return subscriptions.first { $0.id == detailSubscriptionID }
     }
 
-    func presentNewSubscription() {
+    func presentNewSubscription(preset: SubscriptionTemplatePreset? = nil) {
         editingSubscriptionID = nil
+        subscriptionEditorPreset = preset
         isPresentingSubscriptionEditor = true
     }
 
@@ -110,6 +112,7 @@ final class WindowSession {
 
     func presentEditor(for id: UUID) {
         guard subscriptions.contains(where: { $0.id == id }) else { return }
+        subscriptionEditorPreset = nil
         editingSubscriptionID = id
         isPresentingSubscriptionEditor = true
     }
@@ -128,6 +131,7 @@ final class WindowSession {
     func dismissEditor() {
         isPresentingSubscriptionEditor = false
         editingSubscriptionID = nil
+        subscriptionEditorPreset = nil
     }
 
     func clearTimelineFilters() {

@@ -10,7 +10,7 @@
 | 需求 | 功能 | 数据及接口 | 用户结果 |
 | --- | --- | --- | --- |
 | TIME-01～04 | 横向连续日期轴，一条订阅一行，今天线 | subscriptions → TimelineService.load | 直接看到当前周期的到期位置 |
-| TIME-05～07 | 1 月 / 3 月 / 1 年 / 5 年、横纵滚动、定位 | TimelineViewport、TimelineLayout | 缩放不丢失中心日期，范围外仍可定位 |
+| TIME-05～07 | 1 月 / 3 月 / 1 年 / 5 年、宽度适配、纵向滚动、定位 | TimelineViewport、TimelineLayout | 完整范围适配窗口，切换不丢失中心日期 |
 | TIME-08～09 | 无日期列表、详情、编辑、续费 | 同一筛选快照；复用 Tab1 服务 | 未知日期不伪造位置，修改后自动刷新 |
 | TIME-10～13 | 前后平移、近 15 天卡片、终生独立列表 | dueHorizonDays、TimelineSnapshot | 临期不受轴上年份限制，终生不算未知 |
 | DETAIL-01～08、PERIOD-01～07 | 从事件进入共享详情、当年历史、手动周期 | SubscriptionService.detail + PeriodService | 和列表同一详情；主轴不展开历史付款/周期 |
@@ -128,7 +128,6 @@
 | revision | Int64 | 详情编辑/续费使用最新版本 |
 | centerDay | Double / 会话状态 | 公历日序号，可包含小数以支持平滑滚动；非业务日期 |
 | zoom | TimelineZoom / 会话及视图默认偏好 | oneMonth / threeMonths / oneYear / fiveYears |
-| horizontalOffset | CGFloat / 布局状态 | 像素滚动；从 centerDay 派生，不作为备份事实 |
 | selectedSubscriptionID | UUID? / 会话 | 记录消失后清理，不能复用旧选择写新数据集 |
 | dueHorizonDays | Int / WindowSession | 7/15/30，默认 15，两个页面共享范围值 |
 
@@ -180,13 +179,11 @@ rightDay = C + S / 2
 
 ### 4.3 滚动同步与虚拟化
 
-优先用 SwiftUI `ScrollView`、`ScrollPosition`、`onScrollGeometryChange` 管理滚动。日期头和内容不能各有独立的可变水平状态；维护一个 TimelineViewport 作为真值，由同一 horizontalOffset 驱动头部和行。
-
-横向采用有限跨度缓冲区，例如约三个视口宽度，中间为当前可见范围。接近缓冲边缘时重置内容基准日和 offset，并保证重置前后 C 及所有可见日期的屏幕位置不变；不创建覆盖 0001～9999 年的巨大 Canvas。方向定位可直接重建缓冲中心，不逐像素滚过多年。
+时间轴不维护独立的水平滚动状态。当前范围直接映射到内容区完整宽度，窗口缩放时保持中心日期和跨度不变并重新计算 `pixelsPerDay`；刻度文字根据可用间距抽样，网格与事件仍使用真实日期坐标。前一范围、今天、后一范围通过改变中心日期重建同宽视口，不逐像素滚过多年。
 
 纵向使用 `LazyVStack`，采用紧凑的固定统一行高，按 subscriptionID 保持身份，使常见窗口高度能同时浏览更多服务。单行只持有一个事件视图；共享图片缓存按 assetID + 摘要缓存。筛选/数据变化才重建业务投影，像素滚动只做布局，不重新查询数据库或计算全库费用。
 
-先做小型布局验证：连续拖动、轨迹板双向滚动、缓冲重置、滚动条、窗口缩放和键盘焦点。只有原生方案确实无法保持同步/可访问性时，才引入窄范围 AppKit 滚动桥接；业务规则与坐标公式保持独立。
+布局验证覆盖范围切换、窗口缩放、纵向滚动和键盘焦点。只有原生方案确实无法保持同步/可访问性时，才引入窄范围 AppKit 桥接；业务规则与坐标公式保持独立。
 
 ### 4.4 日期变化
 
@@ -225,17 +222,16 @@ struct TimelineSnapshot: Sendable {
 | UndatedRow | id、name、symbolName、iconAssetID?、managementState、category、revision | 仅 recurring 且 expiry=nil；名称及 UUID 排序 |
 | LifetimeRow | id、name、symbolName、iconAssetID?、managementState、category、revision | 仅 lifetime；无日期坐标，可进入共享详情 |
 | upcomingRows | TimelineRow 数组 | datedRows 中 active 且 0≤D≤dueHorizonDays；不另查一个不同版本 |
-| TimelineViewport | centerDay、zoom、spanDays、contentWidth、bufferBaseDay、scrollOffset | 窗口拥有，不进数据库 |
+| TimelineViewport | centerDay、zoom、spanDays、contentWidth | 窗口拥有，不进数据库；所选范围完整映射到当前内容宽度 |
 | TimelineLayout.project | datedRows、viewport、today | LayoutSnapshot：ticks、todayX、rowPlacements |
 | RowPlacement | subscriptionID、position | position = event(anchorX,labelMaxWidth) / before / after |
 | TimelineLayout.zoom | viewport、newZoom | 中心不变的新 viewport |
 | TimelineLayout.center | viewport、targetDate | 缩放不变，中心为目标日 |
-| TimelineLayout.scroll | viewport、deltaX | 更新中心与缓冲基准；不修改订阅日期 |
 | TimelineLayout.shiftRange | viewport、direction(previous/next) | 按当前 zoom 对中心作公历月平移，保持 zoom，支持日期边界检查 |
 
 TimelineService.load 不接收像素尺寸或视口范围，因此不会错误排除范围外记录。布局为纯函数；`datedRows.count + undatedRows.count + lifetimeRows.count == matchedCount`，upcomingRows 是 datedRows 的子集，不能重复加到匹配总数。
 
-TimelineStore 在 MainActor 持有 snapshot、viewport、loadState、requestGeneration。新筛选、相关 DataChange、today 或临期范围变化触发 load；滚动只布局。旧响应丢弃；详情调用 `SubscriptionService.detail`，传 subscriptionID、currentYear、共享 today，历史改动用 PeriodService，当前改动/续费用 SubscriptionService。两者事件语义区分，不另写第二套规则。
+TimelineStore 在 MainActor 持有 snapshot、viewport、loadState、requestGeneration。新筛选、相关 DataChange、today 或临期范围变化触发 load；窗口尺寸变化只重新布局。旧响应丢弃；详情调用 `SubscriptionService.detail`，传 subscriptionID、currentYear、共享 today，历史改动用 PeriodService，当前改动/续费用 SubscriptionService。两者事件语义区分，不另写第二套规则。
 
 ## 6. 本地提醒功能与接口
 
@@ -322,7 +318,7 @@ protocol NotificationPlanBuilder: Sendable {
 
 1. 接入 Tab1 的 LocalDate、DateRules、过滤器、快照和维护路由，验证有日期周期/无日期周期/终生三个集合互斥且完整。
 2. 实现并测试坐标公式、真实日刻度、缩放中心及范围外分类，再搭日期头和行。
-3. 完成水平缓冲、纵向虚拟化、今天和事件定位；核对窗口变宽及缓冲重置无跳动。
+3. 完成当前宽度自适应、纵向虚拟化、今天和事件定位；核对窗口缩放时所选范围始终完整可见。
 4. 加入无日期与终生列表、近 15 天卡片、范围平移、共享编辑与周期续费、跨日刷新及可访问性。
 5. 实现提醒计划纯函数、系统适配器和设置授权流程，最后接入提交事件与恢复事件。
 6. 用大量数据和模拟系统失败验收，再在真实 macOS 26 验证滚动和通知。
@@ -334,7 +330,7 @@ protocol NotificationPlanBuilder: Sendable {
 | 参考布局 | 日期横轴，一订阅一行，只有当前到期事件，无纵向日期分组替代 | TIME-01～04 |
 | 月长及闰年 | 1 月 31 日、2 月 28/29 日、3 月 1 日间距按自然日，头部和锚点共坐标 | AC-03、AC-13 |
 | 四种范围 | 首次五年、今天居中；来回切换保留同中心，窗口缩放不改变中心 | AC-13 |
-| 缓冲重置 | 向两侧持续浏览时日期和鼠标下事件无可见跳位，纵向滚动不移动头部 | TIME-02、TIME-05 |
+| 宽度自适应 | 1 个月到 5 年均完整适配当前窗口宽度，不需要水平滚动；纵向滚动不移动头部 | TIME-02、TIME-05 |
 | 范围外事件 | 两侧方向正确，点击定位到精确到期日，不修改记录 | TIME-07 |
 | 无日期 | 数量受相同筛选影响、天数未知、不安排提醒；补日期后进入时间轴 | AC-04 |
 | 共享筛选 | Tab1 与 Tab2 匹配 ID 集合一致；表格金额排序不改变日历日期排序 | AC-12 |

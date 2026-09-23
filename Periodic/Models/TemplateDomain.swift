@@ -28,6 +28,25 @@ enum TemplateKey: Hashable, Sendable {
     }
 }
 
+enum TemplateCategoryAssignment: Hashable, Codable, Sendable {
+    case builtin(ServiceCategory)
+    case custom(UUID)
+
+    var category: ServiceCategory {
+        switch self {
+        case .builtin(let category): category
+        case .custom: .other
+        }
+    }
+
+    var customCategoryID: UUID? {
+        switch self {
+        case .builtin: nil
+        case .custom(let id): id
+        }
+    }
+}
+
 struct ServiceTemplateDTO: Identifiable, Hashable, Sendable {
     var id: String { key.stableID }
     let key: TemplateKey
@@ -56,6 +75,25 @@ struct ServiceTemplateDTO: Identifiable, Hashable, Sendable {
             cycleMonths: suggestedCycleMonths,
             money: suggestedMoney,
             currency: currency
+        )
+    }
+
+    func assigningCategory(_ assignment: TemplateCategoryAssignment) -> ServiceTemplateDTO {
+        ServiceTemplateDTO(
+            key: key,
+            source: source,
+            name: name,
+            aliases: aliases,
+            category: assignment.category,
+            customCategoryID: assignment.customCategoryID,
+            symbolName: symbolName,
+            iconResourceName: iconResourceName,
+            iconURLString: iconURLString,
+            suggestedBillingKind: suggestedBillingKind,
+            suggestedCycleMonths: suggestedCycleMonths,
+            suggestedMoney: suggestedMoney,
+            currency: currency,
+            revision: revision
         )
     }
 }

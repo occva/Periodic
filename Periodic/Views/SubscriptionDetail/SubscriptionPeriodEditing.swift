@@ -84,7 +84,9 @@ struct SubscriptionPeriodDraft {
             cycleMonths: subscription.cycleMonths
         )
         startDate = defaultStart
-        endDate = subscription.expiry?.date() ?? defaultStart
+        endDate = subscription.billingKind == .lifetime
+            ? LocalDate.defaultLifetimeHistoryEnd.date()
+            : subscription.expiry?.date() ?? defaultStart
         amountText = subscription.money.inputText
         currency = subscription.money.currency
     }
@@ -125,8 +127,8 @@ struct SubscriptionPeriodDraft {
 
     private func validatedValues() throws -> (start: LocalDate, end: LocalDate?, money: Money) {
         let start = LocalDate(startDate)
-        let end = kind == .lifetime ? nil : LocalDate(endDate)
-        if let end, start > end {
+        let end = LocalDate(endDate)
+        if start > end {
             throw SubscriptionPeriodEditError.invalidDateRange
         }
         let money = try Money.parse(amountText, currency: currency)

@@ -18,7 +18,6 @@ struct OverviewView: View {
             Divider()
             footer
         }
-        .searchable(text: $session.searchText, placement: .toolbar, prompt: "搜索订阅名称")
         .toolbar { toolbarContent }
         .accessibilityIdentifier("overview-page")
     }
@@ -252,6 +251,11 @@ struct OverviewView: View {
                 Label("显示列", systemImage: "rectangle.split.3x1")
             }
             .disabled(true)
+
+            ToolbarSearchButton(
+                text: $session.searchText,
+                prompt: "搜索订阅名称"
+            )
         }
     }
 

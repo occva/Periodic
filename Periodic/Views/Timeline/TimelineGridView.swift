@@ -15,71 +15,44 @@ struct TimelineGridView: View {
         TimelineAxisLayout(centerDate: centerDate, range: range)
     }
 
-    private var scrollAnchorID: String {
-        "timeline-\(LocalDate(centerDate).dayNumber)-\(range.rawValue)"
-    }
-
     var body: some View {
         GeometryReader { proxy in
-            let canvasWidth = max(proxy.size.width * 4, 1_600)
-            ScrollViewReader { reader in
-                ScrollView(.horizontal) {
-                    VStack(spacing: 0) {
-                        axis(width: canvasWidth)
-                            .frame(height: axisHeight)
+            let canvasWidth = max(proxy.size.width, 1)
+            VStack(spacing: 0) {
+                axis(width: canvasWidth)
+                    .frame(height: axisHeight)
 
-                        ZStack {
-                            grid(width: canvasWidth)
+                ZStack {
+                    grid(width: canvasWidth)
 
-                            if items.isEmpty {
-                                ContentUnavailableView("没有到期项目", systemImage: "calendar")
-                            } else {
-                                ScrollView(.vertical) {
-                                    LazyVStack(spacing: 0) {
-                                        ForEach(items) { item in
-                                            TimelineRowView(
-                                                item: item,
-                                                layout: layout,
-                                                onEdit: onEdit,
-                                                onDetails: onDetails,
-                                                onCenter: onCenter
-                                            )
-                                                .frame(height: rowHeight)
-                                        }
+                    if items.isEmpty {
+                        ContentUnavailableView("没有到期项目", systemImage: "calendar")
+                    } else {
+                        ScrollView(.vertical) {
+                            GlassEffectContainer(spacing: 4) {
+                                LazyVStack(spacing: 0) {
+                                    ForEach(items) { item in
+                                        TimelineRowView(
+                                            item: item,
+                                            layout: layout,
+                                            onEdit: onEdit,
+                                            onDetails: onDetails,
+                                            onCenter: onCenter
+                                        )
+                                        .frame(height: rowHeight)
                                     }
                                 }
                             }
                         }
-                        .frame(height: max(0, proxy.size.height - axisHeight))
-                    }
-                    .frame(width: canvasWidth)
-                    .overlay(alignment: .topLeading) {
-                        scrollAnchor(width: canvasWidth)
                     }
                 }
-                .scrollIndicators(.visible)
-                .task(id: scrollAnchorID) {
-                    await Task.yield()
-                    reader.scrollTo(scrollAnchorID, anchor: .center)
-                }
+                .frame(height: max(0, proxy.size.height - axisHeight))
             }
+            .frame(width: canvasWidth)
         }
         .frame(minHeight: 300)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("timeline-grid")
-    }
-
-    private func scrollAnchor(width: CGFloat) -> some View {
-        HStack(spacing: 0) {
-            Color.clear
-                .frame(width: layout.x(for: LocalDate(centerDate), width: width))
-            Color.clear
-                .frame(width: 1, height: 1)
-                .id(scrollAnchorID)
-            Spacer(minLength: 0)
-        }
-        .frame(width: width, height: 1)
-        .allowsHitTesting(false)
     }
 
     private func axis(width: CGFloat) -> some View {
@@ -91,8 +64,8 @@ struct TimelineGridView: View {
                     .position(x: layout.majorLabelX(for: tick, width: width), y: 14)
             }
 
-            ForEach(layout.minorTicks, id: \.dayNumber) { tick in
-                if tick != .today {
+            ForEach(Array(layout.minorTicks.enumerated()), id: \.element.dayNumber) { index, tick in
+                if tick != .today && shouldShowMinorLabel(at: index, width: width) {
                     Text(layout.minorLabel(for: tick))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
@@ -114,6 +87,18 @@ struct TimelineGridView: View {
 
             Divider().offset(y: axisHeight - 1)
         }
+    }
+
+    private func shouldShowMinorLabel(at index: Int, width: CGFloat) -> Bool {
+        let intervalCount = max(layout.minorTicks.count - 1, 1)
+        let availableSpacing = width / CGFloat(intervalCount)
+        let minimumLabelSpacing: CGFloat = switch range {
+        case .oneMonth: 22
+        case .threeMonths, .sixMonths, .oneYear: 28
+        case .threeYears, .fiveYears: 22
+        }
+        let stride = max(1, Int(ceil(minimumLabelSpacing / max(availableSpacing, 1))))
+        return index.isMultiple(of: stride)
     }
 
     private func grid(width: CGFloat) -> some View {

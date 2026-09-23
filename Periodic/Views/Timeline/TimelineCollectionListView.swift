@@ -23,19 +23,7 @@ struct TimelineCollectionListView: View {
     let onEdit: (UUID) -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text(title)
-                    .font(.title2.weight(.semibold))
-                Spacer()
-                Button("关闭") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
-                    .buttonStyle(.glass)
-            }
-            .padding(16)
-
-            Divider()
-
+        NavigationStack {
             List(items) { item in
                 Button {
                     onDetails(item.id)
@@ -61,6 +49,13 @@ struct TimelineCollectionListView: View {
                 .contextMenu {
                     Button("订阅详情") { onDetails(item.id) }
                     Button("编辑订阅") { onEdit(item.id) }
+                }
+            }
+            .navigationTitle(title)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("关闭", systemImage: "xmark") { dismiss() }
+                        .keyboardShortcut(.cancelAction)
                 }
             }
         }

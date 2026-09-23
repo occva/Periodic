@@ -47,10 +47,12 @@ struct SubscriptionDetailView: View {
                 Text("共 \(periods.count) 次")
                     .foregroundStyle(.secondary)
                 Spacer()
-                Button("添加记录", systemImage: "plus") {
-                    beginPeriodCreation()
+                if !rows.isEmpty {
+                    Button("添加记录", systemImage: "plus") {
+                        beginPeriodCreation()
+                    }
+                    .disabled(periodDraft != nil || isSavingPeriod || isLoading)
                 }
-                .disabled(periodDraft != nil || isSavingPeriod || isLoading)
 
                 Button(dismissButtonTitle) {
                     if periodDraft == nil {
@@ -65,7 +67,8 @@ struct SubscriptionDetailView: View {
             }
             .padding(16)
         }
-        .frame(minWidth: 900, idealWidth: 1_000, minHeight: 460, idealHeight: 560)
+        .frame(width: 960, height: 560)
+        .presentationSizing(.fitted)
         .task(id: subscription.id) { await reload() }
         .errorAlert($error)
         .accessibilityIdentifier("subscription-detail")
@@ -108,13 +111,14 @@ struct SubscriptionDetailView: View {
             ContentUnavailableView {
                 Label("暂无订阅次数", systemImage: "calendar.badge.clock")
             } description: {
-                Text("具有完整开始和结束日期的新订阅会在这里记录首次周期，也可以手动添加记录。")
+                Text("周期订阅具有完整开始和结束日期时会记录首次周期，也可以手动添加记录。")
             } actions: {
                 Button("添加记录", systemImage: "plus") {
                     beginPeriodCreation()
                 }
                 .buttonStyle(.glass)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             Table(rows) {
                 TableColumn("订阅次数") { row in
@@ -170,18 +174,13 @@ struct SubscriptionDetailView: View {
 
                 TableColumn("结束时间") { row in
                     if isEditing(row) {
-                        if periodDraft?.kind == .lifetime {
-                            Text("永久有效")
-                                .foregroundStyle(.secondary)
-                        } else {
-                            DatePicker(
-                                "结束时间",
-                                selection: draftBinding(\.endDate, fallback: Date()),
-                                displayedComponents: .date
-                            )
-                            .labelsHidden()
-                            .controlSize(.small)
-                        }
+                        DatePicker(
+                            "结束时间",
+                            selection: draftBinding(\.endDate, fallback: Date()),
+                            displayedComponents: .date
+                        )
+                        .labelsHidden()
+                        .controlSize(.small)
                     } else {
                         Text(row.period?.end?.displayText ?? "永久有效")
                             .contentShape(Rectangle())

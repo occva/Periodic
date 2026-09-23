@@ -12,6 +12,7 @@ final class AppServices {
     let templateCategoryStore: TemplateCategoryStore?
     let appleIconSearch: AppleIconSearchClient
     let appleIconCache: AppleIconCache
+    let builtinTemplateCategoryStore: BuiltinTemplateCategoryStore?
     let builtinTemplates: BuiltinTemplateCatalog?
     let modelContainer: ModelContainer?
     private(set) var initializationError: PresentedError?
@@ -41,17 +42,20 @@ final class AppServices {
                 SubscriptionPeriodRecord.self,
                 ServiceTemplateRecord.self,
                 TemplateCategoryRecord.self,
+                BuiltinTemplateCategoryAssignmentRecord.self,
             ])
             let container = try persistence.makeContainer(schema: schema, inMemory: useMemoryStore)
             modelContainer = container
             subscriptionStore = SubscriptionStore(modelContainer: container)
             templateStore = TemplateStore(modelContainer: container)
             templateCategoryStore = TemplateCategoryStore(modelContainer: container)
+            builtinTemplateCategoryStore = BuiltinTemplateCategoryStore(modelContainer: container)
         } catch {
             modelContainer = nil
             subscriptionStore = nil
             templateStore = nil
             templateCategoryStore = nil
+            builtinTemplateCategoryStore = nil
             initializationError = PresentedError(error, title: "无法打开订阅数据")
         }
     }
@@ -76,6 +80,11 @@ final class AppServices {
             )
         )
         #endif
+    }
+
+    func prepareStoredSubscriptionData() async throws {
+        guard let subscriptionStore else { return }
+        _ = try await subscriptionStore.backfillLifetimePeriods()
     }
 
     func notifySubscriptionDataChanged() {

@@ -5,6 +5,7 @@ struct ContentView: View {
     @SceneStorage("window.destination") private var destinationID = AppDestination.dashboard.rawValue
     @SceneStorage("window.sidebarVisible") private var sidebarVisible = true
     @State private var session = WindowSession()
+    @State private var pendingTemplatePreset: SubscriptionTemplatePreset?
 
     private var selection: Binding<AppDestination?> {
         Binding(
@@ -42,7 +43,10 @@ struct ContentView: View {
             onDismiss: { session.dismissEditor() }
         ) {
             let existing = session.editingSubscription
-            SubscriptionEditorView(subscription: existing) { input in
+            SubscriptionEditorView(
+                subscription: existing,
+                preset: existing == nil ? session.subscriptionEditorPreset : nil
+            ) { input in
                 guard let store = services.subscriptionStore else {
                     throw ContentViewError.storeUnavailable
                 }
@@ -102,9 +106,20 @@ struct ContentView: View {
                 get: { session.isPresentingTemplateLibrary },
                 set: { if !$0 { session.dismissTemplateLibrary() } }
             ),
-            onDismiss: { session.dismissTemplateLibrary() }
+            onDismiss: {
+                session.dismissTemplateLibrary()
+                guard let preset = pendingTemplatePreset else { return }
+                pendingTemplatePreset = nil
+                session.presentNewSubscription(preset: preset)
+            }
         ) {
-            TemplateLibraryView(presentation: .sheet) { input in
+            TemplateLibraryView(
+                presentation: .sheet,
+                onSelectPreset: { preset in
+                    pendingTemplatePreset = preset
+                    session.dismissTemplateLibrary()
+                }
+            ) { input in
                 guard let store = services.subscriptionStore else {
                     throw ContentViewError.storeUnavailable
                 }
@@ -115,9 +130,10 @@ struct ContentView: View {
         }
         .task {
             do {
+                try await services.prepareStoredSubscriptionData()
                 try await services.prepareDevelopmentDataIfRequested()
             } catch {
-                session.loadError = PresentedError(error, title: "无法准备测试数据")
+                session.loadError = PresentedError(error, title: "无法准备订阅数据")
             }
             await session.reload(using: services)
         }

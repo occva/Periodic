@@ -123,6 +123,38 @@ struct SubscriptionAnalyticsTests {
         #expect(item.remainingProgress(relativeTo: anchor) == 0)
     }
 
+    @Test func tableProgressUsesAbsoluteRemainingDaysOnHundredDayScale() {
+        let oneHundredOneDays = makeListItem(
+            makeInput(
+                name: "剩余一百零一天",
+                expiry: LocalDate(dayNumber: anchor.dayNumber + 101)
+            )
+        )
+        let ninetyNineDays = makeListItem(
+            makeInput(
+                name: "剩余九十九天",
+                expiry: LocalDate(dayNumber: anchor.dayNumber + 99)
+            )
+        )
+        let thirtyDays = makeListItem(
+            makeInput(
+                name: "剩余三十天",
+                expiry: LocalDate(dayNumber: anchor.dayNumber + 30)
+            )
+        )
+        let expired = makeListItem(
+            makeInput(
+                name: "已过期",
+                expiry: LocalDate(dayNumber: anchor.dayNumber - 1)
+            )
+        )
+
+        #expect(oneHundredOneDays.remainingDaysProgress(relativeTo: anchor) == 1)
+        #expect(ninetyNineDays.remainingDaysProgress(relativeTo: anchor) == 0.99)
+        #expect(thirtyDays.remainingDaysProgress(relativeTo: anchor) == 0.3)
+        #expect(expired.remainingDaysProgress(relativeTo: anchor) == 0)
+    }
+
     @MainActor
     @Test func tableDefaultsToRemainingDaysFromPositiveToNegative() async throws {
         let services = AppServices(inMemory: true)

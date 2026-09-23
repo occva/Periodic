@@ -82,6 +82,9 @@ actor SubscriptionStore {
                 throw StoreError.revisionConflict
             }
             record.apply(input)
+            if input.billingKind == .lifetime {
+                try insertLifetimePeriodIfNeeded(for: input)
+            }
             try modelContext.save()
         } catch {
             modelContext.rollback()
@@ -135,6 +138,58 @@ actor SubscriptionStore {
             period.apply(input)
             subscription.markHistoryChanged()
             try modelContext.save()
+        } catch {
+            modelContext.rollback()
+            throw error
+        }
+    }
+
+    /// Completes the lifetime-history invariant for data created before the
+    /// app began materializing a bounded lifetime period automatically.
+    func backfillLifetimePeriods() throws -> Int {
+        do {
+            let subscriptions = try modelContext.fetch(FetchDescriptor<SubscriptionRecord>())
+            let periods = try modelContext.fetch(FetchDescriptor<SubscriptionPeriodRecord>())
+            let lifetimePeriods = periods.filter {
+                $0.billingKindRaw == BillingKind.lifetime.rawValue
+            }
+            var subscriptionIDsWithLifetimePeriod = Set(lifetimePeriods.map(\.subscriptionID))
+            var changedCount = 0
+
+            for period in lifetimePeriods where period.endDay == nil {
+                period.endDay = LocalDate.defaultLifetimeHistoryEnd.dayNumber
+                changedCount += 1
+            }
+
+            for subscription in subscriptions where
+                subscription.billingKindRaw == BillingKind.lifetime.rawValue
+                    && !subscriptionIDsWithLifetimePeriod.contains(subscription.id) {
+                guard let currency = CurrencyCode(rawValue: subscription.currencyCode),
+                      currency.scale == subscription.currencyScale else {
+                    throw StoreError.invalidStoredValue("currencyCode")
+                }
+                let period = SubscriptionPeriodCreateInput(
+                    id: UUID(),
+                    subscriptionID: subscription.id,
+                    billingKind: .lifetime,
+                    cycleMonths: nil,
+                    start: subscription.periodStartDay.map(LocalDate.init(dayNumber:))
+                        ?? LocalDate(subscription.createdAt),
+                    end: .defaultLifetimeHistoryEnd,
+                    money: Money(
+                        minorUnits: subscription.periodAmountMinor,
+                        currency: currency
+                    )
+                )
+                modelContext.insert(SubscriptionPeriodRecord(input: period))
+                subscriptionIDsWithLifetimePeriod.insert(subscription.id)
+                changedCount += 1
+            }
+
+            if changedCount > 0 {
+                try modelContext.save()
+            }
+            return changedCount
         } catch {
             modelContext.rollback()
             throw error
@@ -198,10 +253,9 @@ actor SubscriptionStore {
     }
 
     private func initialPeriod(for input: SubscriptionCreateInput) -> SubscriptionPeriodCreateInput? {
-        guard let start = input.periodStart else { return nil }
         switch input.billingKind {
         case .recurring:
-            guard let expiry = input.expiry else { return nil }
+            guard let start = input.periodStart, let expiry = input.expiry else { return nil }
             return SubscriptionPeriodCreateInput(
                 id: UUID(),
                 subscriptionID: input.id,
@@ -217,10 +271,22 @@ actor SubscriptionStore {
                 subscriptionID: input.id,
                 billingKind: .lifetime,
                 cycleMonths: nil,
-                start: start,
-                end: nil,
+                start: input.periodStart ?? .today,
+                end: .defaultLifetimeHistoryEnd,
                 money: input.money
             )
         }
+    }
+
+    private func insertLifetimePeriodIfNeeded(for input: SubscriptionCreateInput) throws {
+        let periods = try modelContext.fetch(FetchDescriptor<SubscriptionPeriodRecord>())
+        guard !periods.contains(where: {
+            $0.subscriptionID == input.id
+                && $0.billingKindRaw == BillingKind.lifetime.rawValue
+        }) else {
+            return
+        }
+        guard let period = initialPeriod(for: input) else { return }
+        modelContext.insert(SubscriptionPeriodRecord(input: period))
     }
 }

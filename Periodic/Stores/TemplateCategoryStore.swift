@@ -98,6 +98,13 @@ actor TemplateCategoryStore {
             template.revision += 1
             template.updatedAt = Date()
         }
+
+        let builtinAssignments = try modelContext.fetch(
+            FetchDescriptor<BuiltinTemplateCategoryAssignmentRecord>()
+        )
+        for assignment in builtinAssignments where assignment.customCategoryID == id {
+            assignment.apply(.builtin(.other))
+        }
         modelContext.delete(category)
         try modelContext.save()
     }

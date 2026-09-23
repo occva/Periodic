@@ -4,6 +4,36 @@ import Testing
 @testable import Periodic
 
 struct SubscriptionPeriodEditingTests {
+    @Test func lifetimeDraftUsesBoundedHistoryEndDate() throws {
+        let subscription = SubscriptionDTO(
+            id: UUID(),
+            name: "Lifetime",
+            symbolName: "infinity",
+            iconResourceName: nil,
+            iconURLString: nil,
+            category: .tools,
+            managementState: .active,
+            billingKind: .lifetime,
+            periodStart: nil,
+            expiry: nil,
+            cycleMonths: nil,
+            money: Money(minorUnits: 9_900, currency: .cny),
+            note: "",
+            reminderEnabled: false,
+            revision: 1,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+
+        let input = try SubscriptionPeriodDraft(subscription: subscription).addInput(
+            subscriptionID: subscription.id,
+            expectedSubscriptionRevision: subscription.revision
+        )
+
+        #expect(input.period.billingKind == .lifetime)
+        #expect(input.period.end == .defaultLifetimeHistoryEnd)
+    }
+
     @MainActor
     @Test func manuallyAddingHistoryKeepsCurrentSubscriptionValuesUnchanged() async throws {
         let controller = PersistenceController()

@@ -3,6 +3,9 @@ import Foundation
 struct LocalDate: Hashable, Comparable, Codable, Sendable {
     let dayNumber: Int
 
+    /// Default end shown when creating a lifetime history period.
+    static let defaultLifetimeHistoryEnd = LocalDate(dayNumber: 47_481) // 2099-12-31
+
     init(dayNumber: Int) {
         self.dayNumber = dayNumber
     }

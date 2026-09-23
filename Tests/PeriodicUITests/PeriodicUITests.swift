@@ -16,6 +16,21 @@ final class PeriodicUITests: XCTestCase {
         XCTAssertTrue(app.popUpButtons["appearance-picker"].waitForExistence(timeout: 5))
     }
 
+    func testTemplateLibraryKeepsItsSidebarVisible() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-ApplePersistenceIgnoreState", "YES", "-store-in-memory"]
+        app.launch()
+        defer { app.terminate() }
+
+        XCTAssertTrue(app.descendants(matching: .any)["dashboard-page"].waitForExistence(timeout: 10))
+        app.descendants(matching: .any)["destination-templates"].click()
+
+        let templateSidebar = app.descendants(matching: .any)["template-library-sidebar"]
+        XCTAssertTrue(templateSidebar.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.searchFields["搜索模板名称或别名"].waitForExistence(timeout: 5))
+    }
+
     func testNewWindowUsesIndependentScene() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -80,6 +95,26 @@ final class PeriodicUITests: XCTestCase {
             .matching(NSPredicate(format: "value == %@", "CNY 12.50"))
             .firstMatch
         XCTAssertTrue(savedAmount.waitForExistence(timeout: 5))
+    }
+
+    func testAppleIconPickerCanBeDismissedWithEscape() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-ApplePersistenceIgnoreState", "YES", "-store-in-memory"]
+        app.launch()
+        defer { app.terminate() }
+
+        XCTAssertTrue(app.descendants(matching: .any)["dashboard-page"].waitForExistence(timeout: 10))
+        app.typeKey("n", modifierFlags: .command)
+
+        let appleSearchButton = app.buttons["search-apple-icon"]
+        XCTAssertTrue(appleSearchButton.waitForExistence(timeout: 5))
+        appleSearchButton.click()
+
+        let queryField = app.textFields["apple-icon-query"]
+        XCTAssertTrue(queryField.waitForExistence(timeout: 5))
+        app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
+        XCTAssertFalse(queryField.waitForExistence(timeout: 2))
     }
 
     func testCreatingSubscriptionRefreshesEveryOpenWindow() {

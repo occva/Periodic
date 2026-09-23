@@ -27,6 +27,14 @@ enum TemplateLibrarySelection: Hashable {
         case .customCategory(let id): template.customCategoryID == id
         }
     }
+
+    var categoryAssignment: TemplateCategoryAssignment? {
+        switch self {
+        case .builtinCategory(let category): .builtin(category)
+        case .customCategory(let id): .custom(id)
+        case .all, .builtin, .user: nil
+        }
+    }
 }
 
 enum TemplateGroup: Identifiable {
