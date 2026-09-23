@@ -47,3 +47,16 @@ Stores ─────────────→ Models、Schema
 - 并发隔离、事务边界和错误语义。
 
 每批结构调整后运行现有单元测试；完成后运行完整测试和 Debug 构建。
+
+## 可选扩展
+
+需要独立架构边界或详细补充的设计放在 [扩展功能规格](extensions/README.md)：
+
+- [iCloud 多端同步](extensions/1-iCloud多端同步规格.md)
+- [AI 订阅助手](extensions/2-AI订阅助手规格.md)
+- [数据导入与导出](extensions/3-数据导入导出规格.md)
+- [菜单栏订阅速览](extensions/4-菜单栏订阅速览规格.md)
+- [试用、取消计划与续费意图](extensions/5-试用取消计划与续费意图规格.md)
+- [变更记录与安全撤销](extensions/6-变更记录与安全撤销规格.md)
+
+扩展必须通过 Adapter 和 Service 接入，不能让文件格式、CloudKit 或 Provider SDK 反向渗透到 Domain、Store 或具体页面。未启用网络扩展时，应用保持现有本地行为。
