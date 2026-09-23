@@ -11,11 +11,13 @@ struct LocalDate: Hashable, Comparable, Codable, Sendable {
     }
 
     init(_ date: Date, calendar: Calendar = .current) {
-        let components = calendar.dateComponents([.year, .month, .day], from: date)
-        var utc = Calendar(identifier: .gregorian)
-        utc.timeZone = TimeZone(secondsFromGMT: 0)!
-        let normalized = utc.date(from: components) ?? Date(timeIntervalSince1970: 0)
-        dayNumber = Int(normalized.timeIntervalSince1970 / 86_400)
+        var localGregorian = Calendar(identifier: .gregorian)
+        localGregorian.timeZone = calendar.timeZone
+        let components = localGregorian.dateComponents([.year, .month, .day], from: date)
+        let normalized = Self.utcGregorian.date(from: components)
+        dayNumber = normalized.flatMap {
+            Self.utcGregorian.dateComponents([.day], from: Self.epoch, to: $0).day
+        } ?? 0
     }
 
     static var today: LocalDate { LocalDate(Date()) }
@@ -30,13 +32,25 @@ struct LocalDate: Hashable, Comparable, Codable, Sendable {
     }
 
     func date(calendar: Calendar = .current) -> Date {
-        calendar.date(from: dateComponents) ?? Date(timeIntervalSince1970: 0)
+        var localGregorian = Calendar(identifier: .gregorian)
+        localGregorian.timeZone = calendar.timeZone
+        return localGregorian.date(from: dateComponents) ?? Self.epoch
     }
 
     private var dateComponents: DateComponents {
-        var utc = Calendar(identifier: .gregorian)
-        utc.timeZone = TimeZone(secondsFromGMT: 0)!
-        let date = Date(timeIntervalSince1970: TimeInterval(dayNumber * 86_400))
-        return utc.dateComponents([.year, .month, .day], from: date)
+        let date = Self.utcGregorian.date(byAdding: .day, value: dayNumber, to: Self.epoch)
+            ?? Self.epoch
+        return Self.utcGregorian.dateComponents([.year, .month, .day], from: date)
+    }
+
+    private static var utcGregorian: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .gmt
+        return calendar
+    }
+
+    private static var epoch: Date {
+        utcGregorian.date(from: DateComponents(year: 1970, month: 1, day: 1))
+            ?? Date(timeIntervalSince1970: 0)
     }
 }

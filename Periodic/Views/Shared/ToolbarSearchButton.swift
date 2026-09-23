@@ -46,10 +46,5 @@ struct ToolbarSearchButton: View {
             .frame(width: 320)
             .onAppear { isFieldFocused = true }
         }
-        .onChange(of: isPresented) { _, isPresented in
-            if !isPresented {
-                text = ""
-            }
-        }
     }
 }

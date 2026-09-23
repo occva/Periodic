@@ -63,6 +63,7 @@ actor AppleIconCache {
         guard data.count <= Self.maximumImageSize else {
             throw CacheError.imageTooLarge
         }
+        try validateImageData(data)
         let key = cacheKey(for: url.absoluteString)
         let destination = try storedIconDirectory()
             .appending(path: key)
@@ -91,16 +92,7 @@ actor AppleIconCache {
         guard data.count <= Self.maximumImageSize else {
             throw CacheError.imageTooLarge
         }
-        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
-              CGImageSourceGetCount(source) > 0,
-              CGImageSourceCreateImageAtIndex(source, 0, nil) != nil else {
-            throw CacheError.invalidImage
-        }
-        guard let typeIdentifier = CGImageSourceGetType(source) as String?,
-              typeIdentifier == UTType.png.identifier
-                || typeIdentifier == UTType.jpeg.identifier else {
-            throw CacheError.unsupportedImageType
-        }
+        try validateImageData(data)
 
         let key = cacheKey(for: data)
         let destination = try storedLocalIconDirectory()
@@ -200,6 +192,19 @@ actor AppleIconCache {
     private func validateCacheKey(_ key: String) throws {
         guard key.count == 64, key.allSatisfy(\.isHexDigit) else {
             throw CacheError.invalidReference
+        }
+    }
+
+    private func validateImageData(_ data: Data) throws {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              CGImageSourceGetCount(source) > 0,
+              CGImageSourceCreateImageAtIndex(source, 0, nil) != nil else {
+            throw CacheError.invalidImage
+        }
+        guard let typeIdentifier = CGImageSourceGetType(source) as String?,
+              typeIdentifier == UTType.png.identifier
+                || typeIdentifier == UTType.jpeg.identifier else {
+            throw CacheError.unsupportedImageType
         }
     }
 }

@@ -137,7 +137,7 @@ struct BuiltinServiceCatalog: Decodable, Sendable {
         let aliases: [String]
         let category: ServiceCategory
         let symbolName: String
-        let iconResourceName: String?
+        let iconResourceName: String
         let suggestedBillingKind: BillingKind
         let suggestedCycleMonths: Int?
         let currency: CurrencyCode

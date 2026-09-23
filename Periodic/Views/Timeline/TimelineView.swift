@@ -73,6 +73,7 @@ struct TimelineView: View {
                                         }
                                         .buttonStyle(.plain)
                                         .help("查看订阅详情")
+                                        .accessibilityLabel("查看 \(item.name) 的订阅详情")
                                         Text(item.name).font(.headline)
                                     }
                                     Text(item.expiryDate)

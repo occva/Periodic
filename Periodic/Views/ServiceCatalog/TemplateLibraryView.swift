@@ -131,7 +131,7 @@ struct TemplateLibraryView: View {
         .toolbar { toolbarContent }
         .accessibilityIdentifier("template-library-content")
         .navigationDestination(item: $selectedPreset) { preset in
-            SubscriptionEditorView(preset: preset) { input in
+            SubscriptionEditorView(preset: preset) { input, _ in
                 try await onCreateSubscription(input)
                 if presentation == .sheet {
                     dismiss()
@@ -209,7 +209,8 @@ struct TemplateLibraryView: View {
             ContentUnavailableView {
                 Label(emptyStateTitle, systemImage: "square.grid.2x2")
             } description: {
-                if searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                if presentation == .embedded,
+                   searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                    selection.categoryAssignment != nil {
                     Text("从“全部模板”拖动模板到左侧分类。")
                 }

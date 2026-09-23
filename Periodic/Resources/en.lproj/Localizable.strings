@@ -41,7 +41,8 @@
 "管理状态" = "Management Status";
 "图标" = "Icon";
 "移除图片" = "Remove Image";
-"从 Apple 搜索…" = "Search Apple…";
+"Apple 搜索…" = "Apple Search…";
+"本地图片…" = "Local Image…";
 "计费与价格" = "Billing & Price";
 "计费类型" = "Billing Type";
 "周期" = "Cycle";
@@ -195,4 +196,6 @@
 "搜索" = "Search";
 "正在向 Apple 查询…" = "Searching Apple…";
 "搜索 Apple 图标" = "Search Apple Icons";
+"选择 Apple 图标" = "Choose Apple Icon";
+"输入应用名称后按 Return，或点按“搜索”。" = "Enter an app name and press Return, or click Search.";
 "设置" = "Settings";

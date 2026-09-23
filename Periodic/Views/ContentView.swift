@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @Environment(AppServices.self) private var services
+    @Environment(\.scenePhase) private var scenePhase
     @SceneStorage("window.destination") private var destinationID = AppDestination.dashboard.rawValue
     @SceneStorage("window.sidebarVisible") private var sidebarVisible = true
     @State private var session = WindowSession()
@@ -46,12 +47,16 @@ struct ContentView: View {
             SubscriptionEditorView(
                 subscription: existing,
                 preset: existing == nil ? session.subscriptionEditorPreset : nil
-            ) { input in
+            ) { input, historyPolicy in
                 guard let store = services.subscriptionStore else {
                     throw ContentViewError.storeUnavailable
                 }
                 if let existing {
-                    try await store.update(input, expectedRevision: existing.revision)
+                    try await store.update(
+                        input,
+                        expectedRevision: existing.revision,
+                        historyPolicy: historyPolicy
+                    )
                 } else {
                     _ = try await store.create(input)
                 }
@@ -141,6 +146,20 @@ struct ContentView: View {
             Task { @MainActor in
                 await session.reload(using: services)
             }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                session.refreshReferenceDate()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged)) { _ in
+            session.refreshReferenceDate()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .NSSystemClockDidChange)) { _ in
+            session.refreshReferenceDate()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .NSSystemTimeZoneDidChange)) { _ in
+            session.refreshReferenceDate()
         }
         .errorAlert(
             Binding(

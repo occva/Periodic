@@ -11,19 +11,16 @@ struct TimelineGridView: View {
     private let axisHeight: CGFloat = 58
     private let rowHeight: CGFloat = 34
 
-    private var layout: TimelineAxisLayout {
-        TimelineAxisLayout(centerDate: centerDate, range: range)
-    }
-
     var body: some View {
         GeometryReader { proxy in
             let canvasWidth = max(proxy.size.width, 1)
+            let layout = TimelineAxisLayout(centerDate: centerDate, range: range)
             VStack(spacing: 0) {
-                axis(width: canvasWidth)
+                axis(layout: layout, width: canvasWidth)
                     .frame(height: axisHeight)
 
                 ZStack {
-                    grid(width: canvasWidth)
+                    grid(layout: layout, width: canvasWidth)
 
                     if items.isEmpty {
                         ContentUnavailableView("没有到期项目", systemImage: "calendar")
@@ -55,7 +52,7 @@ struct TimelineGridView: View {
         .accessibilityIdentifier("timeline-grid")
     }
 
-    private func axis(width: CGFloat) -> some View {
+    private func axis(layout: TimelineAxisLayout, width: CGFloat) -> some View {
         ZStack(alignment: .topLeading) {
             ForEach(layout.majorTicks, id: \.dayNumber) { tick in
                 Text(layout.majorLabel(for: tick))
@@ -65,7 +62,11 @@ struct TimelineGridView: View {
             }
 
             ForEach(Array(layout.minorTicks.enumerated()), id: \.element.dayNumber) { index, tick in
-                if tick != .today && shouldShowMinorLabel(at: index, width: width) {
+                if tick != .today && shouldShowMinorLabel(
+                    at: index,
+                    minorTickCount: layout.minorTicks.count,
+                    width: width
+                ) {
                     Text(layout.minorLabel(for: tick))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
@@ -89,8 +90,12 @@ struct TimelineGridView: View {
         }
     }
 
-    private func shouldShowMinorLabel(at index: Int, width: CGFloat) -> Bool {
-        let intervalCount = max(layout.minorTicks.count - 1, 1)
+    private func shouldShowMinorLabel(
+        at index: Int,
+        minorTickCount: Int,
+        width: CGFloat
+    ) -> Bool {
+        let intervalCount = max(minorTickCount - 1, 1)
         let availableSpacing = width / CGFloat(intervalCount)
         let minimumLabelSpacing: CGFloat = switch range {
         case .oneMonth: 22
@@ -101,7 +106,7 @@ struct TimelineGridView: View {
         return index.isMultiple(of: stride)
     }
 
-    private func grid(width: CGFloat) -> some View {
+    private func grid(layout: TimelineAxisLayout, width: CGFloat) -> some View {
         ZStack(alignment: .topLeading) {
             ForEach(layout.minorTicks, id: \.dayNumber) { tick in
                 Rectangle()
@@ -192,6 +197,7 @@ private struct TimelineRowView: View {
                         }
                         .buttonStyle(.plain)
                         .help("查看订阅详情")
+                        .accessibilityLabel("查看 \(item.name) 的订阅详情")
                         Text(item.name)
                             .lineLimit(1)
                             .layoutPriority(1)

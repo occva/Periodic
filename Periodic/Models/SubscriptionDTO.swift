@@ -56,6 +56,11 @@ struct SubscriptionPeriodUpdateInput: Sendable {
     let money: Money
 }
 
+enum SubscriptionUpdateHistoryPolicy: Sendable {
+    case currentOnly
+    case appendPeriodRecord
+}
+
 struct SubscriptionCreateInput: Sendable {
     let id: UUID
     let name: String

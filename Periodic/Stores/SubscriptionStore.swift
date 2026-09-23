@@ -7,6 +7,7 @@ actor SubscriptionStore {
         case invalidStoredValue(String)
         case notFound
         case periodNotFound
+        case incompletePeriodDates
         case revisionConflict
 
         var errorDescription: String? {
@@ -14,6 +15,7 @@ actor SubscriptionStore {
             case .invalidStoredValue(let field): "订阅数据的 \(field) 字段无法识别。"
             case .notFound: "这条订阅已不存在。"
             case .periodNotFound: "这条周期记录已不存在。"
+            case .incompletePeriodDates: "开始日期和到期日期必须同时填写，才能添加周期记录。"
             case .revisionConflict: "这条订阅已在别处修改，请刷新后重试。"
             }
         }
@@ -23,7 +25,23 @@ actor SubscriptionStore {
         let descriptor = FetchDescriptor<SubscriptionRecord>(
             sortBy: [SortDescriptor(\.createdAt, order: .forward)]
         )
-        return try modelContext.fetch(descriptor).map(makeDTO)
+        let records = try modelContext.fetch(descriptor)
+        var subscriptions: [SubscriptionDTO] = []
+        var firstConversionError: (any Error)?
+        for record in records {
+            do {
+                subscriptions.append(try makeDTO(record))
+            } catch {
+                firstConversionError = firstConversionError ?? error
+            }
+        }
+        if subscriptions.isEmpty, !records.isEmpty, let firstConversionError {
+            throw firstConversionError
+        }
+        if firstConversionError != nil {
+            AppLog.persistence.warning("Skipped invalid subscription records while loading")
+        }
+        return subscriptions
     }
 
     func create(_ input: SubscriptionCreateInput) throws -> UUID {
@@ -69,10 +87,30 @@ actor SubscriptionStore {
                 SortDescriptor(\.createdAt, order: .forward),
             ]
         )
-        return try modelContext.fetch(descriptor).map(makePeriodDTO)
+        let records = try modelContext.fetch(descriptor)
+        var periods: [SubscriptionPeriodDTO] = []
+        var firstConversionError: (any Error)?
+        for record in records {
+            do {
+                periods.append(try makePeriodDTO(record))
+            } catch {
+                firstConversionError = firstConversionError ?? error
+            }
+        }
+        if periods.isEmpty, !records.isEmpty, let firstConversionError {
+            throw firstConversionError
+        }
+        if firstConversionError != nil {
+            AppLog.persistence.warning("Skipped invalid subscription period records while loading")
+        }
+        return periods
     }
 
-    func update(_ input: SubscriptionCreateInput, expectedRevision: Int64) throws {
+    func update(
+        _ input: SubscriptionCreateInput,
+        expectedRevision: Int64,
+        historyPolicy: SubscriptionUpdateHistoryPolicy
+    ) throws {
         do {
             let descriptor = FetchDescriptor<SubscriptionRecord>()
             guard let record = try modelContext.fetch(descriptor).first(where: { $0.id == input.id }) else {
@@ -81,10 +119,21 @@ actor SubscriptionStore {
             guard record.revision == expectedRevision else {
                 throw StoreError.revisionConflict
             }
-            record.apply(input)
-            if input.billingKind == .lifetime {
-                try insertLifetimePeriodIfNeeded(for: input)
+            switch historyPolicy {
+            case .currentOnly:
+                if input.billingKind == .lifetime {
+                    try insertLifetimePeriodIfNeeded(
+                        for: input,
+                        fallbackStart: LocalDate(record.createdAt)
+                    )
+                }
+            case .appendPeriodRecord:
+                guard let period = initialPeriod(for: input) else {
+                    throw StoreError.incompletePeriodDates
+                }
+                modelContext.insert(SubscriptionPeriodRecord(input: period))
             }
+            record.apply(input)
             try modelContext.save()
         } catch {
             modelContext.rollback()
@@ -166,7 +215,10 @@ actor SubscriptionStore {
                     && !subscriptionIDsWithLifetimePeriod.contains(subscription.id) {
                 guard let currency = CurrencyCode(rawValue: subscription.currencyCode),
                       currency.scale == subscription.currencyScale else {
-                    throw StoreError.invalidStoredValue("currencyCode")
+                    AppLog.persistence.warning(
+                        "Skipped lifetime history backfill for a subscription with invalid currency metadata"
+                    )
+                    continue
                 }
                 let period = SubscriptionPeriodCreateInput(
                     id: UUID(),
@@ -252,7 +304,10 @@ actor SubscriptionStore {
         )
     }
 
-    private func initialPeriod(for input: SubscriptionCreateInput) -> SubscriptionPeriodCreateInput? {
+    private func initialPeriod(
+        for input: SubscriptionCreateInput,
+        fallbackStart: LocalDate = .today
+    ) -> SubscriptionPeriodCreateInput? {
         switch input.billingKind {
         case .recurring:
             guard let start = input.periodStart, let expiry = input.expiry else { return nil }
@@ -271,22 +326,30 @@ actor SubscriptionStore {
                 subscriptionID: input.id,
                 billingKind: .lifetime,
                 cycleMonths: nil,
-                start: input.periodStart ?? .today,
+                start: input.periodStart ?? fallbackStart,
                 end: .defaultLifetimeHistoryEnd,
                 money: input.money
             )
         }
     }
 
-    private func insertLifetimePeriodIfNeeded(for input: SubscriptionCreateInput) throws {
-        let periods = try modelContext.fetch(FetchDescriptor<SubscriptionPeriodRecord>())
-        guard !periods.contains(where: {
-            $0.subscriptionID == input.id
-                && $0.billingKindRaw == BillingKind.lifetime.rawValue
-        }) else {
+    private func insertLifetimePeriodIfNeeded(
+        for input: SubscriptionCreateInput,
+        fallbackStart: LocalDate
+    ) throws {
+        let subscriptionID = input.id
+        let lifetimeRawValue = BillingKind.lifetime.rawValue
+        var descriptor = FetchDescriptor<SubscriptionPeriodRecord>(
+            predicate: #Predicate {
+                $0.subscriptionID == subscriptionID
+                    && $0.billingKindRaw == lifetimeRawValue
+            }
+        )
+        descriptor.fetchLimit = 1
+        guard try modelContext.fetch(descriptor).isEmpty else {
             return
         }
-        guard let period = initialPeriod(for: input) else { return }
+        guard let period = initialPeriod(for: input, fallbackStart: fallbackStart) else { return }
         modelContext.insert(SubscriptionPeriodRecord(input: period))
     }
 }

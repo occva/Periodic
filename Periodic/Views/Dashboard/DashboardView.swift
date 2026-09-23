@@ -26,7 +26,27 @@ struct DashboardView: View {
             }
             .padding(20)
         }
+        .toolbar { toolbarContent }
         .accessibilityIdentifier("dashboard-page")
+    }
+
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .primaryAction) {
+            Menu {
+                Button("空白新建") {
+                    session.presentNewSubscription()
+                }
+                Button("从服务模板新建") {
+                    session.presentTemplateLibrary()
+                }
+                Divider()
+                Button("CSV 导入") {}
+                    .disabled(true)
+            } label: {
+                Label("新建", systemImage: "plus")
+            }
+        }
     }
 
     private var overviewSection: some View {
@@ -114,6 +134,7 @@ struct DashboardView: View {
                                     }
                                     .buttonStyle(.plain)
                                     .help("查看订阅详情")
+                                    .accessibilityLabel("查看 \(item.name) 的订阅详情")
                                     Text(item.name)
                                     Spacer()
                                     Text(item.expiryDate)
@@ -175,6 +196,7 @@ struct DashboardView: View {
                                             )
                                         }
                                         .buttonStyle(.plain)
+                                        .accessibilityLabel("查看 \(item.name) 的订阅详情")
                                         Text(item.name).lineLimit(1)
                                         Spacer()
                                         Text(

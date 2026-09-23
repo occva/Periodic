@@ -5,7 +5,10 @@ struct SubscriptionEditorView: View {
 
     let subscription: SubscriptionDTO?
     let preset: SubscriptionTemplatePreset?
-    let onSave: @MainActor (SubscriptionCreateInput) async throws -> Void
+    let onSave: @MainActor (
+        SubscriptionCreateInput,
+        SubscriptionUpdateHistoryPolicy
+    ) async throws -> Void
 
     @State private var name = ""
     @State private var iconResourceName: String?
@@ -24,12 +27,17 @@ struct SubscriptionEditorView: View {
     @State private var note = ""
     @State private var isSaving = false
     @State private var isPresentingIconPicker = false
+    @State private var isPresentingPeriodRecordChoice = false
+    @State private var pendingSaveInput: SubscriptionCreateInput?
     @State private var error: PresentedError?
 
     init(
         subscription: SubscriptionDTO? = nil,
         preset: SubscriptionTemplatePreset? = nil,
-        onSave: @escaping @MainActor (SubscriptionCreateInput) async throws -> Void
+        onSave: @escaping @MainActor (
+            SubscriptionCreateInput,
+            SubscriptionUpdateHistoryPolicy
+        ) async throws -> Void
     ) {
         self.subscription = subscription
         self.preset = preset
@@ -94,6 +102,8 @@ struct SubscriptionEditorView: View {
                             fallbackSeed: name,
                             size: 44
                         )
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(iconDescription)
                         Spacer()
                         if iconResourceName != nil || iconURLString != nil {
                             Button("移除图片") {
@@ -216,23 +226,91 @@ struct SubscriptionEditorView: View {
                 iconURLString = reference
             }
         }
+        .confirmationDialog(
+            canAddPendingPeriodRecord ? "是否添加周期记录？" : "日期不完整",
+            isPresented: $isPresentingPeriodRecordChoice,
+            titleVisibility: .visible
+        ) {
+            if canAddPendingPeriodRecord {
+                Button("更新并添加周期记录") {
+                    savePendingInput(historyPolicy: .appendPeriodRecord)
+                }
+                .accessibilityIdentifier("save-and-add-period")
+            }
+            Button("仅更新当前设置") {
+                savePendingInput(historyPolicy: .currentOnly)
+            }
+            .accessibilityIdentifier("save-current-only")
+            Button("返回编辑", role: .cancel) {
+                pendingSaveInput = nil
+            }
+        } message: {
+            Text(periodRecordChoiceMessage)
+        }
+    }
+
+    private var iconDescription: String {
+        if iconResourceName != nil { return "使用内置品牌图标" }
+        if iconURLString != nil { return "已设置自定义品牌图标" }
+        return "未设置品牌图标，当前使用占位图标"
     }
 
     private func save() {
         do {
             let input = try validatedInput()
-            isSaving = true
-            Task { @MainActor in
-                do {
-                    try await onSave(input)
-                    dismiss()
-                } catch {
-                    self.error = PresentedError(error, title: "无法保存订阅")
-                    isSaving = false
-                }
+            if shouldAskForPeriodRecord(for: input) {
+                pendingSaveInput = input
+                isPresentingPeriodRecordChoice = true
+            } else {
+                persist(input, historyPolicy: .currentOnly)
             }
         } catch {
             self.error = PresentedError(error, title: "请检查表单")
+        }
+    }
+
+    private var canAddPendingPeriodRecord: Bool {
+        guard let input = pendingSaveInput else { return false }
+        return input.periodStart != nil && input.expiry != nil
+    }
+
+    private var periodRecordChoiceMessage: String {
+        if canAddPendingPeriodRecord {
+            return "当前周期时间已经改变。是否将修改后的周期和当前价格同时保存为一条周期记录？"
+        }
+        return "当前周期缺少开始日期或到期日期，无法形成完整记录。本次可以仅更新当前设置，或返回补充日期。"
+    }
+
+    private func shouldAskForPeriodRecord(for input: SubscriptionCreateInput) -> Bool {
+        guard let subscription,
+              input.billingKind == .recurring else {
+            return false
+        }
+        return subscription.billingKind != input.billingKind
+            || subscription.periodStart != input.periodStart
+            || subscription.expiry != input.expiry
+            || subscription.cycleMonths != input.cycleMonths
+    }
+
+    private func savePendingInput(historyPolicy: SubscriptionUpdateHistoryPolicy) {
+        guard let input = pendingSaveInput else { return }
+        pendingSaveInput = nil
+        persist(input, historyPolicy: historyPolicy)
+    }
+
+    private func persist(
+        _ input: SubscriptionCreateInput,
+        historyPolicy: SubscriptionUpdateHistoryPolicy
+    ) {
+        isSaving = true
+        Task { @MainActor in
+            do {
+                try await onSave(input, historyPolicy)
+                dismiss()
+            } catch {
+                self.error = PresentedError(error, title: "无法保存订阅")
+                isSaving = false
+            }
         }
     }
 
@@ -278,5 +356,5 @@ private enum EditorValidationError: LocalizedError {
 }
 
 #Preview {
-    SubscriptionEditorView { _ in }
+    SubscriptionEditorView { _, _ in }
 }

@@ -72,6 +72,8 @@ struct ServiceTemplateEditorView: View {
                         fallbackSeed: name,
                         size: 52
                     )
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(iconDescription)
                     Spacer()
                     if iconResourceName != nil || iconURLString != nil {
                         Button("移除") {
@@ -151,6 +153,12 @@ struct ServiceTemplateEditorView: View {
     private var navigationTitle: String {
         guard let template else { return "新建我的模板" }
         return template.source == .builtin ? "复制为我的模板" : "编辑我的模板"
+    }
+
+    private var iconDescription: String {
+        if iconResourceName != nil { return "使用内置品牌图标" }
+        if iconURLString != nil { return "已设置自定义品牌图标" }
+        return "未设置品牌图标，当前使用占位图标"
     }
 
     private func save() {

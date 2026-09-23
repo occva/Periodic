@@ -48,6 +48,25 @@ struct SubscriptionDomainTests {
         #expect(AppDestination.allCases.map(\.title) == ["首页", "时间轴视图", "表格视图", "模板管理"])
     }
 
+    @Test func builtinCatalogContainsOnlyTemplatesWithBundledIcons() throws {
+        let catalog = try BuiltinTemplateCatalog.load()
+
+        #expect(catalog.version == "2.3.0")
+        #expect(catalog.templates.count == 125)
+        #expect(catalog.templates.allSatisfy { $0.iconResourceName != nil })
+        #expect(!catalog.templates.contains { $0.key == .builtin("builtin.apple-icloud") })
+
+        let categoriesByKey = Dictionary(
+            uniqueKeysWithValues: catalog.templates.map { ($0.key, $0.category) }
+        )
+        #expect(categoriesByKey[.builtin("builtin.discord-nitro")] == .communication)
+        #expect(categoriesByKey[.builtin("builtin.calm")] == .household)
+        #expect(categoriesByKey[.builtin("builtin.tradingview")] == .tools)
+        #expect(categoriesByKey[.builtin("builtin.patreon")] == .media)
+        #expect(categoriesByKey[.builtin("builtin.claude")] == .tools)
+        #expect(categoriesByKey[.builtin("builtin.gemini")] == .tools)
+    }
+
     @Test func moneyRespectsCurrencyPrecision() throws {
         let cny = try Money.parse("88.50", currency: .cny)
         #expect(cny.minorUnits == 8_850)
@@ -77,6 +96,66 @@ struct SubscriptionDomainTests {
         let localDate = LocalDate(date, calendar: calendar)
 
         #expect(localDate.displayText == "2026/10/15")
+    }
+
+    @Test func localDateKeepsGregorianDateWhenSystemCalendarIsNonGregorian() throws {
+        var sourceCalendar = Calendar(identifier: .gregorian)
+        sourceCalendar.timeZone = try #require(TimeZone(identifier: "Asia/Shanghai"))
+        let date = try #require(
+            sourceCalendar.date(from: DateComponents(year: 2026, month: 9, day: 23))
+        )
+        var buddhistCalendar = Calendar(identifier: .buddhist)
+        buddhistCalendar.timeZone = sourceCalendar.timeZone
+
+        let localDate = LocalDate(date, calendar: buddhistCalendar)
+        let restoredDate = localDate.date(calendar: buddhistCalendar)
+        let restoredComponents = sourceCalendar.dateComponents(
+            [.year, .month, .day],
+            from: restoredDate
+        )
+
+        #expect(localDate.displayText == "2026/09/23")
+        #expect(restoredComponents.year == 2026)
+        #expect(restoredComponents.month == 9)
+        #expect(restoredComponents.day == 23)
+    }
+
+    @MainActor
+    @Test func invalidSubscriptionDoesNotHideValidSubscriptions() async throws {
+        let controller = PersistenceController()
+        let container = try controller.makeContainer(
+            schema: Schema([SubscriptionRecord.self]),
+            inMemory: true
+        )
+        let validInput = SubscriptionCreateInput(
+            id: UUID(),
+            name: "Valid",
+            symbolName: "checkmark",
+            iconResourceName: nil,
+            iconURLString: nil,
+            category: .tools,
+            managementState: .active,
+            billingKind: .recurring,
+            periodStart: nil,
+            expiry: nil,
+            cycleMonths: 1,
+            money: Money(minorUnits: 100, currency: .cny),
+            note: "",
+            reminderEnabled: true
+        )
+        let valid = SubscriptionRecord(input: validInput)
+        let invalid = SubscriptionRecord(input: validInput)
+        invalid.id = UUID()
+        invalid.name = "Invalid"
+        invalid.categoryRaw = "unknown-category"
+        container.mainContext.insert(valid)
+        container.mainContext.insert(invalid)
+        try container.mainContext.save()
+        let store = SubscriptionStore(modelContainer: container)
+
+        let subscriptions = try await store.fetchAll()
+
+        #expect(subscriptions.map(\.name) == ["Valid"])
     }
 
     @MainActor
@@ -157,6 +236,91 @@ struct SubscriptionDomainTests {
     }
 
     @MainActor
+    @Test func editingCurrentPeriodCanOptionallyAppendHistoryAtomically() async throws {
+        let controller = PersistenceController()
+        let container = try controller.makeContainer(
+            schema: Schema([SubscriptionRecord.self, SubscriptionPeriodRecord.self]),
+            inMemory: true
+        )
+        let store = SubscriptionStore(modelContainer: container)
+        let subscriptionID = UUID()
+        let initialStart = LocalDate.today
+        let initial = SubscriptionCreateInput(
+            id: subscriptionID,
+            name: "Optional History",
+            symbolName: "calendar",
+            iconResourceName: nil,
+            iconURLString: nil,
+            category: .tools,
+            managementState: .active,
+            billingKind: .recurring,
+            periodStart: initialStart,
+            expiry: LocalDate(dayNumber: initialStart.dayNumber + 29),
+            cycleMonths: 1,
+            money: try Money.parse("20", currency: .usd),
+            note: "",
+            reminderEnabled: true
+        )
+        _ = try await store.create(initial)
+
+        let created = try #require(try await store.fetchAll().first)
+        let currentOnlyStart = LocalDate(dayNumber: initialStart.dayNumber + 30)
+        let currentOnly = SubscriptionCreateInput(
+            id: subscriptionID,
+            name: initial.name,
+            symbolName: initial.symbolName,
+            iconResourceName: nil,
+            iconURLString: nil,
+            category: initial.category,
+            managementState: initial.managementState,
+            billingKind: .recurring,
+            periodStart: currentOnlyStart,
+            expiry: LocalDate(dayNumber: currentOnlyStart.dayNumber + 29),
+            cycleMonths: 1,
+            money: initial.money,
+            note: "",
+            reminderEnabled: true
+        )
+        try await store.update(
+            currentOnly,
+            expectedRevision: created.revision,
+            historyPolicy: .currentOnly
+        )
+        #expect(try await store.fetchPeriods(for: subscriptionID).count == 1)
+
+        let current = try #require(try await store.fetchAll().first)
+        let recordedStart = LocalDate(dayNumber: currentOnlyStart.dayNumber + 30)
+        let recorded = SubscriptionCreateInput(
+            id: subscriptionID,
+            name: currentOnly.name,
+            symbolName: currentOnly.symbolName,
+            iconResourceName: nil,
+            iconURLString: nil,
+            category: currentOnly.category,
+            managementState: currentOnly.managementState,
+            billingKind: .recurring,
+            periodStart: recordedStart,
+            expiry: LocalDate(dayNumber: recordedStart.dayNumber + 29),
+            cycleMonths: 1,
+            money: currentOnly.money,
+            note: "",
+            reminderEnabled: true
+        )
+        try await store.update(
+            recorded,
+            expectedRevision: current.revision,
+            historyPolicy: .appendPeriodRecord
+        )
+
+        let periods = try await store.fetchPeriods(for: subscriptionID)
+        #expect(periods.count == 2)
+        #expect(periods.last?.start == recorded.periodStart)
+        #expect(periods.last?.end == recorded.expiry)
+        let finalSubscription = try #require(try await store.fetchAll().first)
+        #expect(finalSubscription.revision == current.revision + 1)
+    }
+
+    @MainActor
     @Test func existingLifetimeSubscriptionWithoutHistoryIsBackfilled() async throws {
         let controller = PersistenceController()
         let container = try controller.makeContainer(
@@ -188,6 +352,133 @@ struct SubscriptionDomainTests {
         #expect(try await store.backfillLifetimePeriods() == 0)
         let period = try #require(try await store.fetchPeriods(for: subscriptionID).first)
         #expect(period.end == .defaultLifetimeHistoryEnd)
+    }
+
+    @MainActor
+    @Test func changingExistingSubscriptionToLifetimeUsesCreationDateForHistory() async throws {
+        let controller = PersistenceController()
+        let container = try controller.makeContainer(
+            schema: Schema([SubscriptionRecord.self, SubscriptionPeriodRecord.self]),
+            inMemory: true
+        )
+        let subscriptionID = UUID()
+        let createdAt = Date(timeIntervalSince1970: 1_705_000_000)
+        let original = SubscriptionCreateInput(
+            id: subscriptionID,
+            name: "Existing",
+            symbolName: "calendar",
+            iconResourceName: nil,
+            iconURLString: nil,
+            category: .tools,
+            managementState: .active,
+            billingKind: .recurring,
+            periodStart: nil,
+            expiry: nil,
+            cycleMonths: 1,
+            money: try Money.parse("99", currency: .cny),
+            note: "",
+            reminderEnabled: true
+        )
+        container.mainContext.insert(SubscriptionRecord(input: original, now: createdAt))
+        try container.mainContext.save()
+        let store = SubscriptionStore(modelContainer: container)
+        let lifetime = SubscriptionCreateInput(
+            id: subscriptionID,
+            name: original.name,
+            symbolName: original.symbolName,
+            iconResourceName: nil,
+            iconURLString: nil,
+            category: original.category,
+            managementState: original.managementState,
+            billingKind: .lifetime,
+            periodStart: nil,
+            expiry: nil,
+            cycleMonths: nil,
+            money: original.money,
+            note: "",
+            reminderEnabled: false
+        )
+
+        try await store.update(
+            lifetime,
+            expectedRevision: 1,
+            historyPolicy: .currentOnly
+        )
+
+        let period = try #require(try await store.fetchPeriods(for: subscriptionID).first)
+        #expect(period.start == LocalDate(createdAt))
+        #expect(period.end == .defaultLifetimeHistoryEnd)
+    }
+
+    @MainActor
+    @Test func lifetimeBackfillSkipsInvalidCurrencyWithoutRollingBackValidRepairs() async throws {
+        let controller = PersistenceController()
+        let container = try controller.makeContainer(
+            schema: Schema([SubscriptionRecord.self, SubscriptionPeriodRecord.self]),
+            inMemory: true
+        )
+        let validID = UUID()
+        let invalidID = UUID()
+        let existingPeriodID = UUID()
+        let createdAt = Date(timeIntervalSince1970: 1_705_000_000)
+        let money = try Money.parse("99", currency: .cny)
+
+        func lifetimeInput(id: UUID, name: String) -> SubscriptionCreateInput {
+            SubscriptionCreateInput(
+                id: id,
+                name: name,
+                symbolName: "infinity",
+                iconResourceName: nil,
+                iconURLString: nil,
+                category: .tools,
+                managementState: .active,
+                billingKind: .lifetime,
+                periodStart: nil,
+                expiry: nil,
+                cycleMonths: nil,
+                money: money,
+                note: "",
+                reminderEnabled: false
+            )
+        }
+
+        container.mainContext.insert(
+            SubscriptionRecord(input: lifetimeInput(id: validID, name: "Valid"), now: createdAt)
+        )
+        let invalidRecord = SubscriptionRecord(
+            input: lifetimeInput(id: invalidID, name: "Invalid"),
+            now: createdAt
+        )
+        invalidRecord.currencyCode = "INVALID"
+        container.mainContext.insert(invalidRecord)
+        container.mainContext.insert(
+            SubscriptionPeriodRecord(
+                input: SubscriptionPeriodCreateInput(
+                    id: existingPeriodID,
+                    subscriptionID: UUID(),
+                    billingKind: .lifetime,
+                    cycleMonths: nil,
+                    start: LocalDate(createdAt),
+                    end: nil,
+                    money: money
+                )
+            )
+        )
+        try container.mainContext.save()
+        let store = SubscriptionStore(modelContainer: container)
+
+        #expect(try await store.backfillLifetimePeriods() == 2)
+        #expect(try await store.backfillLifetimePeriods() == 0)
+        let inserted = try #require(try await store.fetchPeriods(for: validID).first)
+        #expect(inserted.start == LocalDate(createdAt))
+        #expect(inserted.end == .defaultLifetimeHistoryEnd)
+        #expect(try await store.fetchPeriods(for: invalidID).isEmpty)
+
+        let repairedDescriptor = FetchDescriptor<SubscriptionPeriodRecord>(
+            predicate: #Predicate { $0.id == existingPeriodID }
+        )
+        let repaired = try #require(container.mainContext.fetch(repairedDescriptor).first)
+        #expect(repaired.endDay == LocalDate.defaultLifetimeHistoryEnd.dayNumber)
     }
 
     @MainActor
@@ -300,6 +591,55 @@ struct SubscriptionDomainTests {
             try await builtinCategoryStore.fetchAssignments()["chatgpt"]
                 == .builtin(.other)
         )
+
+        do {
+            try await templateStore.save(
+                ServiceTemplateInput(
+                    id: UUID(),
+                    expectedRevision: nil,
+                    name: "悬空分类模板",
+                    aliases: [],
+                    category: .other,
+                    customCategoryID: categoryID,
+                    symbolName: "questionmark.folder",
+                    iconResourceName: nil,
+                    iconURLString: nil,
+                    suggestedBillingKind: .recurring,
+                    suggestedCycleMonths: 1,
+                    suggestedMoney: nil,
+                    currency: .cny
+                )
+            )
+            Issue.record("不应允许模板引用已删除的分类。")
+        } catch TemplateStore.StoreError.categoryNotFound {
+            // Expected: stale editors cannot create an orphaned category reference.
+        }
+    }
+
+    @MainActor
+    @Test func invalidBuiltinCategoryAssignmentDoesNotHideValidAssignments() async throws {
+        let controller = PersistenceController()
+        let container = try controller.makeContainer(
+            schema: Schema([BuiltinTemplateCategoryAssignmentRecord.self]),
+            inMemory: true
+        )
+        let valid = BuiltinTemplateCategoryAssignmentRecord(
+            templateKey: "chatgpt",
+            assignment: .builtin(.tools)
+        )
+        let invalid = BuiltinTemplateCategoryAssignmentRecord(
+            templateKey: "broken",
+            assignment: .builtin(.other)
+        )
+        invalid.categoryRaw = "not-a-category"
+        container.mainContext.insert(valid)
+        container.mainContext.insert(invalid)
+        try container.mainContext.save()
+        let store = BuiltinTemplateCategoryStore(modelContainer: container)
+
+        let assignments = try await store.fetchAssignments()
+
+        #expect(assignments == ["chatgpt": .builtin(.tools)])
     }
 
     @Test func missingIconPlaceholderIsStableForAServiceName() {
