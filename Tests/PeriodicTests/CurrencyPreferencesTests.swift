@@ -12,13 +12,41 @@ struct CurrencyPreferencesTests {
     }
 
     @Test func selectedCurrenciesUseDefaultsAndStableStorage() throws {
-        #expect(CurrencyPreferences.selectedCurrencies(from: "") == [.cny, .jpy, .kwd, .usd])
+        #expect(
+            CurrencyPreferences.selectedCurrencies(
+                from: "",
+                useDevelopmentSampleCurrencies: false
+            ) == [.cny, .jpy, .kwd, .usd]
+        )
 
         let euro = try #require(CurrencyCode(rawValue: "EUR"))
         let stored = CurrencyPreferences.storedValue(for: [.usd, euro, .cny, .usd])
 
         #expect(stored == "CNY,EUR,USD")
-        #expect(CurrencyPreferences.selectedCurrencies(from: stored) == [.cny, euro, .usd])
+        #expect(
+            CurrencyPreferences.selectedCurrencies(
+                from: stored,
+                useDevelopmentSampleCurrencies: false
+            ) == [.cny, euro, .usd]
+        )
+    }
+
+    @Test func developmentSampleSelectsEverySampleCurrencyAndMakesSelectionReadOnly() {
+        let stored = "CNY"
+
+        #expect(
+            CurrencyPreferences.selectedCurrencies(
+                from: stored,
+                useDevelopmentSampleCurrencies: true
+            ) == CurrencyPreferences.developmentSampleCurrencies.sorted {
+                $0.rawValue < $1.rawValue
+            }
+        )
+        #expect(
+            !CurrencyPreferences.canEditSelectedCurrencies(
+                useDevelopmentSampleCurrencies: true
+            )
+        )
     }
 
     @Test func currentUnselectedCurrencyRemainsAvailableForEditing() throws {

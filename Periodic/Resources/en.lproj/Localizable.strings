@@ -80,6 +80,7 @@
 "编辑订阅" = "Edit Subscription";
 "订阅详情" = "Subscription Details";
 "查看订阅详情" = "View Subscription Details";
+"另有 %lld 项订阅" = "%lld more subscriptions";
 "订阅次数" = "Occurrence";
 "开始时间" = "Start Date";
 "结束时间" = "End Date";
@@ -133,6 +134,11 @@
 "季度" = "Quarterly";
 "半年" = "Semiannual";
 "年度" = "Annual";
+"月付" = "Monthly";
+"季付" = "Quarterly";
+"半年付" = "Semiannually";
+"年付" = "Annually";
+"每 %d 个月" = "Every %d Months";
 "工作学习" = "Work & Study";
 "工具产品" = "Tools";
 "影音娱乐" = "Media";
@@ -388,3 +394,4 @@
 "请选择 PNG 或 JPEG 图片。" = "Select a PNG or JPEG image.";
 "图标文件过大，无法保存。" = "The icon file is too large to save.";
 "已保存的图标文件不存在。" = "The saved icon file is missing.";
+"样本模式固定启用全部样本币种，不会修改正式币种偏好。" = "Sample mode keeps all sample currencies enabled without changing your saved currency preferences.";

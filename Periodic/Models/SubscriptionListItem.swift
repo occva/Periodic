@@ -109,6 +109,24 @@ struct SubscriptionListItem: Identifiable, Hashable, Sendable {
         money.displayText(style: style)
     }
 
+    func paymentSummary(style: CurrencyDisplayStyle) -> String {
+        guard billingKindValue == .recurring, let cycleMonths else {
+            return money.displayText(style: style)
+        }
+        let cadence = switch cycleMonths {
+        case 1: AppLocalization.string("月付")
+        case 3: AppLocalization.string("季付")
+        case 6: AppLocalization.string("半年付")
+        case 12: AppLocalization.string("年付")
+        default:
+            String(
+                format: AppLocalization.string("每 %d 个月"),
+                cycleMonths
+            )
+        }
+        return "\(cadence) \(money.displayText(style: style))"
+    }
+
     var monthlyEstimate: String {
         guard billingKindValue == .recurring, let cycleMonths else { return "—" }
         return money.monthlyEstimate(cycleMonths: cycleMonths)

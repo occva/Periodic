@@ -101,6 +101,12 @@ struct SubscriptionAnalytics: Sendable {
             .sorted { $0.currency.rawValue < $1.currency.rawValue }
     }
 
+    func forecastItems(for currency: CurrencyCode) -> [SubscriptionListItem] {
+        forecastItems
+            .filter { $0.money.currency == currency }
+            .sorted(by: expiryAscending)
+    }
+
     var categoryForecasts: [CategoryForecast] {
         Dictionary(grouping: forecastItems) {
             CategoryForecast.ID(category: $0.categoryValue, currency: $0.money.currency)

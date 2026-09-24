@@ -8,6 +8,8 @@ struct DashboardView: View {
     @State private var feature = DashboardFeature()
     @State private var expandedCategories = Set<ServiceCategory>()
     @State private var upcomingScope = DashboardUpcomingScope.active
+    @State private var forecastTooltipItemID: UUID?
+    @State private var forecastTooltipTask: Task<Void, Never>?
 
     private var analytics: SubscriptionAnalytics { session.analytics }
 
@@ -22,6 +24,9 @@ struct DashboardView: View {
         .toolbar { toolbarContent }
         .task(id: categoryExchangeRateRequestID) {
             await loadCategoryExchangeRates()
+        }
+        .onDisappear {
+            forecastTooltipTask?.cancel()
         }
         .accessibilityIdentifier("dashboard-page")
     }
@@ -100,10 +105,11 @@ struct DashboardView: View {
                     ScrollView {
                         LazyVStack(spacing: 0) {
                             ForEach(currencyForecasts) { forecast in
-                                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                                HStack(spacing: 12) {
                                     Text(currencyDisplayStyle.label(for: forecast.currency))
                                         .font(.headline)
-                                    Spacer()
+                                    currencyForecastIcons(for: forecast.currency)
+                                    Spacer(minLength: 8)
                                     VStack(alignment: .trailing, spacing: 4) {
                                         Text(
                                             "月均 \(Money.display(forecast.monthly, currency: forecast.currency, style: currencyDisplayStyle))"
@@ -297,6 +303,87 @@ struct DashboardView: View {
         analytics.currencyForecasts
     }
 
+    private func currencyForecastIcons(for currency: CurrencyCode) -> some View {
+        let items = analytics.forecastItems(for: currency)
+        let visibleItems = Array(items.prefix(DashboardLayout.maximumCurrencyForecastIcons))
+        let remainingCount = items.count - visibleItems.count
+        return HStack(spacing: 6) {
+            ForEach(visibleItems) { item in
+                Button {
+                    dismissForecastTooltip()
+                    session.presentDetails(for: item.id)
+                } label: {
+                    ServiceIconView(
+                        iconResourceName: item.iconResourceName,
+                        iconURLString: item.iconURLString,
+                        fallbackSeed: item.name,
+                        size: DashboardLayout.currencyForecastIconSize
+                    )
+                }
+                .buttonStyle(.plain)
+                .onHover { isHovering in
+                    updateForecastTooltip(for: item.id, isHovering: isHovering)
+                }
+                .popover(
+                    isPresented: forecastTooltipBinding(for: item.id),
+                    attachmentAnchor: .rect(.bounds),
+                    arrowEdge: .bottom
+                ) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(item.name)
+                            .font(.headline)
+                        Text(item.paymentSummary(style: currencyDisplayStyle))
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                    .padding(10)
+                }
+                .accessibilityLabel("查看 \(item.name) 的订阅详情")
+                .accessibilityHint(item.paymentSummary(style: currencyDisplayStyle))
+            }
+            if remainingCount > 0 {
+                Text("+\(remainingCount)")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .layoutPriority(1)
+                    .accessibilityLabel("另有 \(remainingCount) 项订阅")
+            }
+        }
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
+    private func forecastTooltipBinding(for itemID: UUID) -> Binding<Bool> {
+        Binding(
+            get: { forecastTooltipItemID == itemID },
+            set: { isPresented in
+                if !isPresented, forecastTooltipItemID == itemID {
+                    forecastTooltipItemID = nil
+                }
+            }
+        )
+    }
+
+    private func updateForecastTooltip(for itemID: UUID, isHovering: Bool) {
+        forecastTooltipTask?.cancel()
+        guard isHovering else {
+            if forecastTooltipItemID == itemID {
+                forecastTooltipItemID = nil
+            }
+            return
+        }
+        forecastTooltipTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(200))
+            guard !Task.isCancelled else { return }
+            forecastTooltipItemID = itemID
+        }
+    }
+
+    private func dismissForecastTooltip() {
+        forecastTooltipTask?.cancel()
+        forecastTooltipItemID = nil
+    }
+
     private var displayedUpcomingItems: [SubscriptionListItem] {
         switch upcomingScope {
         case .active: session.dashboardActiveSubscriptionItems
@@ -374,6 +461,8 @@ struct DashboardView: View {
 
 private enum DashboardLayout {
     static let maximumVisibleCurrencyForecasts = 4
+    static let maximumCurrencyForecastIcons = 5
+    static let currencyForecastIconSize: CGFloat = 24
     static let currencyForecastRowHeight: CGFloat = 60
     static let dividerHeight: CGFloat = 1
     static let scrollIndicatorGutter: CGFloat = 14

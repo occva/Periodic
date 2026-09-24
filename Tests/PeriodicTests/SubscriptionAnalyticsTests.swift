@@ -6,14 +6,24 @@ import Testing
 struct SubscriptionAnalyticsTests {
     private let anchor = LocalDate(dayNumber: 20_468) // 2026-01-15
 
-    @Test func developmentDatasetCoversLargeAndVariedTimeline() {
-        let inputs = DevelopmentSubscriptionDataset.make(referenceDate: anchor)
+    @Test func developmentDatasetCoversLargeAndVariedTimeline() throws {
+        let templates = try BuiltinTemplateCatalog.load().templates
+        let inputs = DevelopmentSubscriptionDataset.make(
+            referenceDate: anchor,
+            templates: templates
+        )
 
         #expect(inputs.count == 240)
         #expect(Set(inputs.map(\.id)).count == inputs.count)
         #expect(Set(inputs.map(\.name)).count == inputs.count)
         #expect(Set(inputs.map(\.category)) == Set(ServiceCategory.allCases))
-        #expect(Set(inputs.map(\.money.currency)) == Set(CurrencyCode.allCases))
+        #expect(Set(inputs.map(\.money.currency)) == Set(CurrencyPreferences.developmentSampleCurrencies))
+        #expect(inputs.allSatisfy { $0.iconResourceName != nil })
+        #expect(inputs.allSatisfy { input in
+            templates.contains { template in
+                input.name == template.name || input.name.hasPrefix("\(template.name) · ")
+            }
+        })
         #expect(Set(inputs.map(\.managementState)) == Set(ManagementState.allCases))
         #expect(Set(inputs.map(\.billingKind)) == Set(BillingKind.allCases))
         #expect(inputs.contains { $0.billingKind == .recurring && $0.expiry == nil })
@@ -195,6 +205,39 @@ struct SubscriptionAnalyticsTests {
         #expect(Set(tools.forecasts.map(\.currency)) == [.cny, .usd])
         #expect(quote.annualTotal(forecasts: tools.forecasts) == 1_320)
         #expect(items.map(\.money.currency) == [.cny, .usd, .cny])
+    }
+
+    @Test func currencyForecastItemsContainOnlyContributorsInExpiryOrder() {
+        let items = [
+            makeListItem(
+                makeInput(
+                    name: "较晚人民币订阅",
+                    expiry: LocalDate(dayNumber: anchor.dayNumber + 20),
+                    currency: .cny
+                )
+            ),
+            makeListItem(
+                makeInput(
+                    name: "美元订阅",
+                    expiry: LocalDate(dayNumber: anchor.dayNumber + 1),
+                    currency: .usd
+                )
+            ),
+            makeListItem(
+                makeInput(
+                    name: "较早人民币订阅",
+                    expiry: LocalDate(dayNumber: anchor.dayNumber + 5),
+                    currency: .cny
+                )
+            ),
+        ]
+        let analytics = SubscriptionAnalytics(items: items, referenceDate: anchor)
+
+        #expect(
+            analytics.forecastItems(for: .cny).map(\.name)
+                == ["较早人民币订阅", "较晚人民币订阅"]
+        )
+        #expect(analytics.forecastItems(for: .usd).map(\.name) == ["美元订阅"])
     }
 
     @MainActor

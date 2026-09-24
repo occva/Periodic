@@ -109,6 +109,12 @@ struct ExchangeRateSettingsView: View {
                 .foregroundStyle(.secondary)
         }
 
+        if !CurrencyPreferences.canEditSelectedCurrencies() {
+            Text("样本模式固定启用全部样本币种，不会修改正式币种偏好。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+
         if let error = feature.error {
             Label(error.message, systemImage: "exclamationmark.triangle")
                 .font(.caption)
@@ -124,7 +130,10 @@ struct ExchangeRateSettingsView: View {
                     Toggle("选择 \(row.currencyCode)", isOn: selectionBinding(for: currency))
                         .labelsHidden()
                         .toggleStyle(.checkbox)
-                        .disabled(isOnlySelectedCurrency(currency))
+                        .disabled(
+                            !CurrencyPreferences.canEditSelectedCurrencies()
+                                || isOnlySelectedCurrency(currency)
+                        )
                 }
             }
             .width(28)
@@ -174,6 +183,7 @@ struct ExchangeRateSettingsView: View {
         Binding(
             get: { selectedCurrencies.contains(currency) },
             set: { isSelected in
+                guard CurrencyPreferences.canEditSelectedCurrencies() else { return }
                 var updated = Set(selectedCurrencies)
                 if isSelected {
                     updated.insert(currency)

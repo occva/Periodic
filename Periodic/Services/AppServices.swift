@@ -82,7 +82,10 @@ final class AppServices {
         didPrepareDevelopmentData = true
         let existingItems = try await subscriptionStore.fetchAll()
         guard existingItems.isEmpty else { return }
-        let subscriptions = DevelopmentSubscriptionDataset.make(referenceDate: referenceDate)
+        let subscriptions = DevelopmentSubscriptionDataset.make(
+            referenceDate: referenceDate,
+            templates: builtinTemplates?.templates ?? []
+        )
         try await subscriptionStore.create(
             subscriptions,
             additionalPeriods: DevelopmentSubscriptionDataset.makeHistoricalPeriods(

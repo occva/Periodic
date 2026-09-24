@@ -6,7 +6,8 @@ enum DevelopmentSubscriptionDataset {
 
     static func make(
         referenceDate: LocalDate,
-        count: Int = defaultCount
+        count: Int = defaultCount,
+        templates: [ServiceTemplateDTO] = []
     ) -> [SubscriptionCreateInput] {
         let offsets = [
             -1_095, -730, -366, -365, -181, -91, -31, -30, -16, -15,
@@ -14,10 +15,10 @@ enum DevelopmentSubscriptionDataset {
             366, 730, 1_095,
         ]
         let cycles = BillingCycle.allCases
-        let categories = ServiceCategory.allCases
-        let currencies = CurrencyCode.allCases
+        let currencies = CurrencyPreferences.developmentSampleCurrencies
 
         return (0..<max(0, count)).map { index in
+            let template = templates.isEmpty ? nil : templates[index % templates.count]
             let isLifetime = index.isMultiple(of: 19)
             let isUndated = !isLifetime && index.isMultiple(of: 13)
             let isInactive = index.isMultiple(of: 17)
@@ -33,11 +34,11 @@ enum DevelopmentSubscriptionDataset {
 
             return SubscriptionCreateInput(
                 id: UUID(),
-                name: String(format: "测试服务 %03d", index + 1),
-                symbolName: "calendar.badge.clock",
-                iconResourceName: nil,
-                iconURLString: nil,
-                category: categories[index % categories.count],
+                name: sampleName(template: template, index: index, templateCount: templates.count),
+                symbolName: template?.symbolName ?? "calendar.badge.clock",
+                iconResourceName: template?.iconResourceName,
+                iconURLString: template?.iconURLString,
+                category: sampleCategory(template: template, index: index),
                 managementState: isInactive ? .inactive : .active,
                 billingKind: isLifetime ? .lifetime : .recurring,
                 periodStart: periodStart,
@@ -85,6 +86,28 @@ enum DevelopmentSubscriptionDataset {
 
     private static func minorUnitFactor(for currency: CurrencyCode) -> Int64 {
         (0..<currency.scale).reduce(Int64(1)) { result, _ in result * 10 }
+    }
+
+    private static func sampleName(
+        template: ServiceTemplateDTO?,
+        index: Int,
+        templateCount: Int
+    ) -> String {
+        guard let template, templateCount > 0 else {
+            return String(format: "测试服务 %03d", index + 1)
+        }
+        let occurrence = index / templateCount + 1
+        return occurrence == 1 ? template.name : "\(template.name) · \(occurrence)"
+    }
+
+    private static func sampleCategory(
+        template: ServiceTemplateDTO?,
+        index: Int
+    ) -> ServiceCategory {
+        if index.isMultiple(of: 31) {
+            return .other
+        }
+        return template?.category ?? ServiceCategory.allCases[index % ServiceCategory.allCases.count]
     }
 }
 #endif
