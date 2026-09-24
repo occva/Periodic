@@ -4,6 +4,12 @@ import Testing
 @testable import Periodic
 
 struct SubscriptionDomainTests {
+    @Test func timelineRangePreferenceFallsBackToFiveYears() {
+        #expect(TimelinePreferences.range(for: TimelineRange.oneYear.rawValue) == .oneYear)
+        #expect(TimelinePreferences.range(for: 999) == .fiveYears)
+        #expect(TimelinePreferences.normalizedRangeRawValue(999) == 60)
+    }
+
     @Test func languageAndCurrencyPreferencesResolvePersistedValues() {
         let defaults = UserDefaults.standard
         let previousLanguage = defaults.string(forKey: PreferenceKey.language)

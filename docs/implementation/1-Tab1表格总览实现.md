@@ -25,7 +25,7 @@
 
 - 主窗口使用 `WindowGroup`，以 `NavigationSplitView` 侧边栏依次呈现 `dashboard` 首页、`timeline` 时间轴视图、`overview` 表格视图、`templates` 模板管理。
 - 首页是默认入口；详情、新建、编辑、续费、付款维护均为共享内容，其他页面调用同一套组件。
-- 偏好设置继续使用独立 `Settings` 场景。提醒设计写在 Tab2；设置、CSV、备份恢复设计写在 Tab3，这只是文档归属。
+- 偏好设置继续使用独立 `Settings` 场景。提醒设计写在 Tab2；数据交换以扩展规格为准，设置只显示已实现的 `.periodicdata` 导入与导出。
 - 接口全部为本地 Swift 进程内调用，不设计 HTTP、账号、云端数据库或自动扣款。
 
 ### 1.2 状态归属
@@ -46,7 +46,7 @@
 
 ### 2.1 表格布局
 
-工具栏包含新建下拉（空白/从模板/CSV）、搜索、筛选、排序、分组、显示列、多选操作和设置入口。表格使用原生 `Table`，最小窗口内容尺寸 960 × 640 点，宽度不足允许水平滚动，工具栏使用系统溢出菜单。截图中缺失的列头仍须实现，错位和重复新建占位不复制。
+工具栏包含新建下拉（空白/从模板）、搜索、筛选、排序、分组、显示列、多选操作和设置入口。数据包导入仅位于设置的“数据”页面。表格使用原生 `Table`，最小窗口内容尺寸 960 × 640 点，宽度不足允许水平滚动，工具栏使用系统溢出菜单。截图中缺失的列头仍须实现，错位和重复新建占位不复制。
 
 | 顺序 | 列 | 来源与显示 | 交互 |
 | --- | --- | --- | --- |
@@ -108,7 +108,7 @@
 
 首次付款日期默认今天，金额和币种可从当前价格预填但允许独立修改，覆盖周期默认使用当前起止日期，未知可空。取消勾选不提交隐藏草稿。普通编辑不生成付款记录。
 
-普通新建/从模板新建在日期足够完整时，同事务写一条 initial 周期（recurring 起止齐全）；lifetime 始终自动写一条记录，开始日使用用户输入或创建日，历史结束日默认 `2099-12-31`。默认日期不写入订阅 expiry，也不改变永久有效语义，用户可在历史记录中修改该结束日。金额为当前报价快照。可选首次付款关联该条周期。周期型日期不足时不制造周期，付款可以无周期关联。复制和 CSV 新建终生项目仍按统一规则生成终生记录，但不复制原历史。
+普通新建/从模板新建在日期足够完整时，同事务写一条 initial 周期（recurring 起止齐全）；lifetime 始终自动写一条记录，开始日使用用户输入或创建日，历史结束日默认 `2099-12-31`。默认日期不写入订阅 expiry，也不改变永久有效语义，用户可在历史记录中修改该结束日。金额为当前报价快照。可选首次付款关联该条周期。周期型日期不足时不制造周期，付款可以无周期关联。复制终生项目仍按统一规则生成终生记录，但不复制原历史；数据包导入只恢复包内明确存在的历史。
 
 编辑后仍为周期订阅，且计费类型、周期、开始日或到期日发生变化时，保存前提供“更新并添加周期记录 / 仅更新当前设置 / 返回编辑”。添加选项保存修改后的类型、周期、完整起止日期及当前报价快照；日期不完整时说明原因并只提供更新当前设置或返回补充。订阅更新和可选周期记录必须使用同一个 Store 事务及同一个 expectedRevision，不能先更新再调用独立的历史写入。切换为终生仍按终生历史规则处理，不显示周期订阅记录选项。
 
@@ -254,11 +254,11 @@
 
 仅更改模板时只递增该模板 revision，不改已生成订阅的 revision；设置同理只更新设置版本。storeRevision 仍是覆盖全部用户数据的事务版本。
 
-多窗口编辑检查记录 revision。版本冲突保留草稿，提供重新加载，不静默覆盖。批量删除、CSV 预览绑定整个 SnapshotVersion。普通查询响应同时校验 datasetID 与页面请求序号。
+多窗口编辑检查记录 revision。版本冲突保留草稿，提供重新加载，不静默覆盖。批量删除和数据包导入预览绑定数据快照。普通查询响应同时校验 datasetID 与页面请求序号。
 
 ### 3.3 文件、迁移及恢复边界
 
-正式接入时使用 `Application Support/Periodic/Datasets/<datasetID>/default.store`，图片放同目录 `Assets/`，由 `active-dataset.json` 指向当前数据集；Tab3 规定整体恢复切换流程。当前骨架只预留 `Periodic/default.store`，尚无业务记录；如发现非空未知旧库，应报错并保留，不自动覆盖。
+未来 iCloud 接入时使用 `Application Support/Periodic/Datasets/<datasetID>/default.store`，图片放同目录 `Assets/`，由已提交的数据集描述指向当前数据集；候选库安全切换流程以 iCloud 扩展规格为准。当前存储位置不得因打开失败而被删除或静默替换。
 
 图片先写为不可变文件，再在数据库事务中登记和引用，提交后回收旧孤立资源。数据库与文件、系统通知不是一个事务。备份期间保留资产读取租约，避免引用中的文件被并发清理。
 
@@ -283,7 +283,7 @@
 
 | 字段 | Swift 类型 | 空值 / 默认 | 约束与来源 |
 | --- | --- | --- | --- |
-| id | UUID | 非空，新 UUID | 新建、复制、CSV、恢复；唯一 |
+| id | UUID | 非空，新 UUID | 新建、复制、数据包导入；唯一 |
 | name | String | 非空，无默认 | trim 后非空；保留 Unicode，允许同名 |
 | symbolName | String | 非空，`app.dashed` | 无效符号显示时回退默认值 |
 | iconAsset | IconAssetRecord? | nil | 已登记图片关系；DTO 输出 iconAssetID |
@@ -299,7 +299,7 @@
 | note | String | 空串 | 允许多行；API 清空映射为空串 |
 | reminderEnabled | Bool | recurring=true、lifetime=false | lifetime 不允许 true |
 | revision | Int64 | 1 | 当前字段或所属付款变更时递增 |
-| createdAt | Date | 创建时间 | 普通编辑、CSV 不得修改 |
+| createdAt | Date | 创建时间 | 普通编辑不得修改；数据包导入按格式规则处理 |
 | updatedAt | Date | 提交时间 | 普通写入更新；恢复可保留原值 |
 | payments | [PaymentRecord] | 空集合 | 反向关系；删除订阅级联删除 |
 | periods | [SubscriptionPeriodRecord] | 空集合 | 反向关系；删除订阅级联删除，不按年份分库 |
@@ -359,7 +359,7 @@ ServiceCategory 稳定值：`workStudy` 工作学习、`tools` 工具产品、`m
 
 回执与实体变更同事务保存。相同 operationID、相同内容返回旧结果；同 ID 不同内容报错。失败不写回执。V1 不自动淘汰回执；备份不携带回执，恢复产生新 datasetID，拒绝旧操作上下文。
 
-CommandReceiptEnvelope 包含 version、resultKind、payload：订阅/周期/付款/模板命令保存 MutationResult，设置命令保存 SettingsSnapshot，CSV 保存 CSVImportResult。以命令类型解码，不能遗漏周期 ID 或导入计数；重放标识只影响响应，不改原提交结果。
+CommandReceiptEnvelope 包含 version、resultKind、payload：订阅/周期/付款/模板命令保存 MutationResult，设置命令保存 SettingsSnapshot。以命令类型解码，不能遗漏周期 ID；重放标识只影响响应，不改原提交结果。数据包导入使用独立回执。
 
 ### 4.6 service_templates 与内置目录
 
@@ -516,7 +516,7 @@ protocol SubscriptionService: Sendable {
 
 新建及续费在服务内生成所需周期/付款 ID，同事务保存关系与回执。historyPolicy 由新建来源路由决定，不让复制自动造历史。保存请求固定 operationID，重试原 ID，改内容换新 ID；先查回执再查 revision，避免成功后的重试被旧版本误拒绝。
 
-新建草稿另带只读来源 metadata：creationOrigin=blank/template/copy、historyPolicy=normal/none；copyDraft 设置 copy/none，模板设置 template/normal，空白设置 blank/normal。它们不属于可编辑 SubscriptionValues，也不持久化到订阅或 CSV；切换普通字段不丢失来源。
+新建草稿另带只读来源 metadata：creationOrigin=blank/template/copy、historyPolicy=normal/none；copyDraft 设置 copy/none，模板设置 template/normal，空白设置 blank/normal。它们不属于可编辑 SubscriptionValues，也不持久化到订阅或数据包；切换普通字段不丢失来源。
 
 收到旧操作回执时可确认该次保存成功，但页面不能用较旧版本覆盖已经展示的新快照；随后按最新版本重新查询。交易型服务内的 today 必须由共享 Clock 在提交时重新校验，不能把表单打开时捕获的旧日期用于跨日后的付款合法性判断。
 
@@ -660,7 +660,7 @@ apply 只更新当前订阅，preview 显示类型转换、当前日期、价格
 | 续费 | 2027/2028 月末、已过期 09-22→10-21、inactive 续费恢复 active | AC-08～09 |
 | 原子性与重试 | 在写周期或付款后、save 前失败，订阅/周期/付款全回滚；同请求仅一周期一付款 | RENEW-03、AC-09 |
 | 付款历史 | 调价、换币不改历史；纠正/删除付款不回退周期；零元实付是合法记录 | AC-10 |
-| 无隐式付款 | 普通新建、复制、CSV 后付款数不增加，详情显示尚无付款记录 | AC-11 |
+| 无隐式付款 | 普通新建、复制后付款数不增加，详情显示尚无付款记录 | AC-11 |
 | 筛选排序 | 五维且关系、无日期降序仍最后、币种内金额排序且终生 nil 置后、Tab 切换保留条件 | AC-12 |
 | 删除与共享图标 | 预览付款计数准确，级联删除；另有订阅引用的图标不删；失败回滚 | AC-20 |
 | 多窗口竞争 | A 保存后 B 旧 revision 被拒绝，恢复后旧 datasetID 不能写入 | NAV-01、NAV-03 |
@@ -677,6 +677,6 @@ apply 只更新当前订阅，preview 显示类型转换、当前日期、价格
 | 年份口径 | 2025-12-15～2026-01-14 在两年可见，2025 付款只计 2025；顶部当前资料不变 | AC-33 |
 | 应用当前 | 单独确认、custom 必选 M、保留价格/状态默认；取消无变化，成功更新提醒 | AC-34 |
 | 删除/关联 | 删周期 nullify 不删付款或退当前日期，旧付款编辑版本冲突；续费幂等三表一致 | AC-35 |
-| 历史边界 | 复制和 CSV 不造周期；备份恢复关联正确；删除预览周期数准确 | AC-36 |
+| 历史边界 | 复制不造周期；数据包恢复已有关系；删除预览周期数准确 | AC-36 |
 
 日期、金额、事务和并发测试使用独立容器；界面用正式构建但独立测试数据集。最终须在 macOS 26 环境验证，不能把现有骨架在 macOS 27 上通过的测试当作这些业务功能已验收。

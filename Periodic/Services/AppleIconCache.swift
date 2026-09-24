@@ -4,6 +4,12 @@ import ImageIO
 import UniformTypeIdentifiers
 
 actor AppleIconCache {
+    struct ImportedImageWrite: Sendable {
+        let reference: String
+        fileprivate let key: String
+        fileprivate let didCreateFile: Bool
+    }
+
     enum CacheError: LocalizedError {
         case invalidURL
         case invalidReference
@@ -16,14 +22,14 @@ actor AppleIconCache {
 
         var errorDescription: String? {
             switch self {
-            case .invalidURL: "图标地址无效。"
-            case .invalidReference: "已保存的图标引用无效。"
-            case .unsupportedHost: "只能保存 Apple 提供的图标。"
-            case .invalidResponse: "Apple 返回的图标数据无效。"
-            case .invalidImage: "所选文件不是可解码的图片。"
-            case .unsupportedImageType: "请选择 PNG 或 JPEG 图片。"
-            case .imageTooLarge: "图标文件超过 10 MB，无法保存。"
-            case .storedImageMissing: "已保存的图标文件不存在。"
+            case .invalidURL: AppLocalization.string("图标地址无效。")
+            case .invalidReference: AppLocalization.string("已保存的图标引用无效。")
+            case .unsupportedHost: AppLocalization.string("只能保存 Apple 提供的图标。")
+            case .invalidResponse: AppLocalization.string("Apple 返回的图标数据无效。")
+            case .invalidImage: AppLocalization.string("所选文件不是可解码的图片。")
+            case .unsupportedImageType: AppLocalization.string("请选择 PNG 或 JPEG 图片。")
+            case .imageTooLarge: AppLocalization.string("图标文件过大，无法保存。")
+            case .storedImageMissing: AppLocalization.string("已保存的图标文件不存在。")
             }
         }
     }
@@ -45,6 +51,7 @@ actor AppleIconCache {
     private static let referencePrefix = "apple-icon:"
     private static let localReferencePrefix = "user-icon:"
     private static let maximumImageSize = 10 * 1_024 * 1_024
+    private static let maximumPixelCount = 32_000_000
 
     func persist(from url: URL) async throws -> String {
         guard url.scheme == "https" else { throw CacheError.invalidURL }
@@ -102,6 +109,52 @@ actor AppleIconCache {
             try data.write(to: destination, options: .atomic)
         }
         return Self.localReferencePrefix + key
+    }
+
+    func persistImportedImage(_ data: Data) throws -> ImportedImageWrite {
+        guard data.count <= Self.maximumImageSize else {
+            throw CacheError.imageTooLarge
+        }
+        try validateImageData(data)
+        let key = cacheKey(for: data)
+        let destination = try storedLocalIconDirectory()
+            .appending(path: key)
+            .appendingPathExtension("image")
+        let didCreateFile = !fileManager.fileExists(atPath: destination.path)
+        if didCreateFile {
+            try data.write(to: destination, options: .atomic)
+        }
+        return ImportedImageWrite(
+            reference: Self.localReferencePrefix + key,
+            key: key,
+            didCreateFile: didCreateFile
+        )
+    }
+
+    func discardImportedImages(
+        _ writes: [ImportedImageWrite],
+        keeping references: Set<String> = []
+    ) {
+        for write in writes where write.didCreateFile && !references.contains(write.reference) {
+            let url: URL
+            do {
+                url = try storedLocalIconDirectory()
+                    .appending(path: write.key)
+                    .appendingPathExtension("image")
+                try fileManager.removeItem(at: url)
+            } catch {
+                if (error as NSError).code != NSFileNoSuchFileError {
+                    AppLog.persistence.error("Failed to remove an unreferenced imported icon")
+                }
+            }
+        }
+    }
+
+    func validateImportedImage(_ data: Data) throws {
+        guard data.count <= Self.maximumImageSize else {
+            throw CacheError.imageTooLarge
+        }
+        try validateImageData(data)
     }
 
     func data(for reference: String) throws -> Data {
@@ -200,6 +253,14 @@ actor AppleIconCache {
               CGImageSourceGetCount(source) > 0,
               CGImageSourceCreateImageAtIndex(source, 0, nil) != nil else {
             throw CacheError.invalidImage
+        }
+        guard let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? Int,
+              let height = properties[kCGImagePropertyPixelHeight] as? Int,
+              width > 0,
+              height > 0,
+              width <= Self.maximumPixelCount / height else {
+            throw CacheError.imageTooLarge
         }
         guard let typeIdentifier = CGImageSourceGetType(source) as String?,
               typeIdentifier == UTType.png.identifier

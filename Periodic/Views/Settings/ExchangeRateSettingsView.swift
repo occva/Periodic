@@ -6,7 +6,9 @@ struct ExchangeRateSettingsView: View {
         case all
 
         var id: String { rawValue }
-        var title: String { self == .selected ? "已选" : "全部" }
+        var title: String {
+            AppLocalization.string(self == .selected ? "已选" : "全部")
+        }
     }
 
     @Environment(AppServices.self) private var services
@@ -15,7 +17,7 @@ struct ExchangeRateSettingsView: View {
     @AppStorage(PreferenceKey.selectedCurrencies) private var selectedCurrenciesRaw = ""
     @State private var feature = ExchangeRateSettingsFeature()
     @State private var searchText = ""
-    @State private var scope = CurrencyScope.all
+    @State private var scope = CurrencyScope.selected
 
     private var selectedCurrencies: [CurrencyCode] {
         CurrencyPreferences.selectedCurrencies(from: selectedCurrenciesRaw)

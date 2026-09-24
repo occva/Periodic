@@ -130,6 +130,7 @@
 | zoom | TimelineZoom / 会话及视图默认偏好 | oneMonth / threeMonths / oneYear / fiveYears |
 | selectedSubscriptionID | UUID? / 会话 | 记录消失后清理，不能复用旧选择写新数据集 |
 | dueHorizonDays | Int / WindowSession | 7/15/30，默认 15，两个页面共享范围值 |
+| timelineRange | TimelineRange / WindowSession | 新窗口从通用设置读取一次默认值；当前窗口后续独立切换，不被设置变更覆盖 |
 
 Double 只用于屏幕坐标，数据库和日期业务仍使用整数自然日；不把浮点坐标反向当作真实到期日保存。
 
@@ -241,7 +242,7 @@ TimelineStore 在 MainActor 持有 snapshot、viewport、loadState、requestGene
 2. 用户主动开启时，先检查系统授权；notDetermined 才请求 alert/sound 授权，保存用户开启意图。
 3. 拒绝后设置显示“系统通知未允许”和打开系统设置指引，其他业务照常；保留开启意图便于用户授权后在前台核对时恢复调度。
 4. 修改提前天数或时间先校验再一次保存，成功后核对请求。全局关闭时移除本应用的待发送提醒，不修改单条开关。
-5. 从备份恢复的开启状态不能触发未经用户操作的授权弹窗；若系统尚未授权，显示需用户主动授权的状态。
+5. 从数据包导入的开启状态不能触发未经用户操作的授权弹窗；若系统尚未授权，显示需用户主动授权的状态。
 
 ### 6.2 计划生成
 

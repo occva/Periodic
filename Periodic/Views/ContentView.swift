@@ -7,7 +7,9 @@ struct ContentView: View {
     @SceneStorage("window.instanceID") private var windowIDText = UUID().uuidString
     @SceneStorage("window.destination") private var destinationID = AppDestination.dashboard.rawValue
     @SceneStorage("window.sidebarVisible") private var sidebarVisible = true
-    @State private var session = WindowSession()
+    @State private var session = WindowSession(
+        timelineRange: AppPreferenceValues.defaultTimelineRange
+    )
     @State private var pendingTemplatePreset: SubscriptionTemplatePreset?
     @State private var pendingWindowRoute: MainWindowRoute?
 

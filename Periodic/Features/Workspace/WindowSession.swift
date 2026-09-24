@@ -12,7 +12,7 @@ final class WindowSession {
     var overviewCategory: ServiceCategory?
     var overviewBillingKind: BillingKind?
     var overviewCurrency: CurrencyCode?
-    var timelineRange = TimelineRange.fiveYears
+    var timelineRange: TimelineRange
     var dueHorizon = DueHorizon.fifteenDays
     var timelineCategory: ServiceCategory?
     var timelineManagementState: ManagementState?
@@ -31,8 +31,12 @@ final class WindowSession {
     private(set) var hasLoadedSubscriptions = false
     var loadError: PresentedError?
 
-    init(referenceDate: LocalDate = .today) {
+    init(
+        referenceDate: LocalDate = .today,
+        timelineRange: TimelineRange = TimelinePreferences.defaultRange
+    ) {
         self.referenceDate = referenceDate
+        self.timelineRange = timelineRange
     }
 
     var analytics: SubscriptionAnalytics {

@@ -22,6 +22,18 @@ enum TimelineRange: Int, CaseIterable, Identifiable {
     }
 }
 
+enum TimelinePreferences {
+    static let defaultRange = TimelineRange.fiveYears
+
+    static func range(for rawValue: Int) -> TimelineRange {
+        TimelineRange(rawValue: rawValue) ?? defaultRange
+    }
+
+    static func normalizedRangeRawValue(_ rawValue: Int) -> Int {
+        range(for: rawValue).rawValue
+    }
+}
+
 enum DueHorizon: Int, CaseIterable, Identifiable, Sendable {
     case sevenDays = 7
     case fifteenDays = 15

@@ -3,7 +3,9 @@
 > 版本：1.2｜日期：2026-09-22｜状态：待实现的详细设计。
 > 产品依据：[需求文档](../requirement.md)。当前 Periodic 尚未实现本模块。
 
-本文覆盖首页统计的需求、功能、数据库、字段、接口、实现及验收，并将设置、CSV 和完整备份恢复作为相关公共能力写在同一文档中。设置仍使用独立 Settings 窗口；模板管理是第四个主页面。
+> 数据交换部分已由 [数据导入与导出规格 v1.3](../extensions/3-数据导入导出规格.md) 取代：当前只保留 `.periodicdata` 完整导出与合并导入。本文第 6～7 节中的 CSV、整体替换恢复和清空方案是历史设计记录，不属于当前实现要求，也不得在设置中显示占位入口。
+
+本文覆盖首页统计的需求、功能、数据库、字段、接口、实现及验收。设置仍使用独立 Settings 窗口；模板管理是第四个主页面。当前数据交换规则以扩展规格为准。
 
 共用订阅/付款模型及写服务见 [Tab1 表格总览](1-Tab1表格总览实现.md)；日期轴、提醒计划和系统授权见 [Tab2 时间线日历](2-Tab2时间线日历实现.md)。
 
@@ -18,8 +20,7 @@
 | STAT-05、COST-05～06 | 已记录实际支出和明细 | payments；付款日期范围 | 付款快照统计，不受当前价格/状态影响 |
 | STAT-06～07 | 数据下钻、终生实付 | 全库记录/付款快照 | 有效终生数量与周期预估分离；真实付款才算支出 |
 | NAV、UI、NOTIFY | 通用、提醒及数据设置 | app_settings；SettingsService | 外观、视图默认值、提醒入口 |
-| CSV-01～10 | CSV 交换 | subscriptions（含 billingKind）；CSVService | 周期和终生均可准确回导、事务导入 |
-| BACKUP-01～06 | 完整备份、恢复、清空 | 全业务数据、图片、设置；BackupService / MaintenanceService | 整体替换可验证，失败保留原数据 |
+| EXCHANGE-01～10 | Periodic 数据包 | 当前 V1 实体、图片和设置白名单；DataExchangeService | 完整导出、校验预览和按 UUID 合并导入 |
 | TECH、QA | 离线、精度、进度、故障保护 | 快照、文件适配器、维护锁 | 可维护、可验证，无网络依赖 |
 
 统计请求不接受 Tab1/Tab2 的 SharedSubscriptionFilter。页面明确标注“全库统计”，切换到本页不清除其他页面已有筛选。
@@ -100,14 +101,14 @@ DataChange、共享 today 或用户切换范围/币种触发重新计算。缓�
 
 | 表 | 使用字段 | 用途 / 写入方 |
 | --- | --- | --- |
-| subscriptions | id、name、billingKindRaw、managementStateRaw、expiryDay、categoryRaw、cycleMonths?、periodAmountMinor、currencyCode、currencyScale、图标引用 | 数量、预估、临期、分类；统计只读，CSV 可写 |
+| subscriptions | id、name、billingKindRaw、managementStateRaw、expiryDay、categoryRaw、cycleMonths?、periodAmountMinor、currencyCode、currencyScale、图标引用 | 数量、预估、临期、分类；统计只读 |
 | subscription_periods | 全部周期字段、父订阅及付款反向关联 | 不聚合成实付；详情、完整备份、恢复和清空使用 |
 | payments | id、subscription、periodRecord?、kindRaw、paymentDay、amountMinor、currencyCode、currencyScale、periodStartDay、periodEndDay、note、createdAt、revision | 只以付款自身事实计实付；可选周期关联不影响金额 |
 | icon_assets | 全字段及文件 | 临期图标、完整备份；统计只读 |
-| service_templates | 全部用户模板字段、图标引用 | 统计不读、不计数；完整备份恢复及清空包含它 |
+| service_templates | 全部用户模板字段、图标引用 | 统计不读、不计数；完整数据包包含它 |
 | app_settings | 全字段 | 设置读写及备份，详见第 4 节 |
 | store_metadata | datasetID、storeRevision、schemaVersion | 统计版本、导入预览、恢复维护 |
-| mutation_receipts | operationID、digest、resultData 等 | CSV/设置写入安全重试，不包含在完整备份中 |
+| mutation_receipts | operationID、digest、resultData 等 | 写入安全重试；不包含在 V1 数据包中 |
 
 subscriptions、payments、icon_assets 的完整逐字段约束沿用 Tab1 第 4 节；本模块以下字段均为这些表的明确投影，不扩展隐含事实字段。
 
@@ -166,7 +167,7 @@ subscriptions、payments、icon_assets 的完整逐字段约束沿用 Tab1 第 4
 | --- | --- | --- |
 | 通用 | 跟随系统/浅色/深色、视图默认偏好 | 外观即时提交；其余去重或显式保存 |
 | 提醒 | 全局开关、提前天数、本地时间、权限和调度状态 | 参数校验后一次提交，用户主动开启才请求授权 |
-| 数据 | CSV 导入、全库导出、完整备份、恢复、清空 | 各自向导；危险动作独立预览确认 |
+| 数据 | `.periodicdata` 导入、完整备份导出 | 校验、预览并确认；不展示未实现功能 |
 
 设置接口使用 typed patch，只改当前操作字段，避免更改外观时覆盖其他窗口刚改的提醒。系统授权行为及 NotificationReport 详见 Tab2 第 6 节。
 
@@ -198,7 +199,7 @@ protocol SettingsService: Sendable {
 
 错误：统计参数非法返回 validation；读取失败返回 storageFailure；设置并发变化返回 revisionConflict；维护期间返回 maintenanceInProgress；数据集已切换返回 datasetChanged。提醒调度失败不改变设置提交成功的事实。
 
-## 6. CSV 导入导出完整设计
+## 6. 已取消的 CSV 历史设计（非实现要求）
 
 ### 6.1 标准字段与映射
 
@@ -317,7 +318,7 @@ protocol CSVService: Sendable {
 
 CSV 额外错误包括 invalidEncoding、malformedCSV、mappingConflict、rowValidation、duplicateID、unsupportedCurrency、stalePlan、fileAccessDenied、writeFailed。错误附行号和字段路径，不能只弹一个“导入失败”。解析/验证支持取消，进入单事务保存后仅等待提交结果，不承诺中途逐行撤销。
 
-## 7. 完整备份、恢复和清空
+## 7. 已取消的整体恢复与清空历史设计（非实现要求）
 
 ### 7.1 包结构和字段
 
@@ -470,24 +471,22 @@ planID 指向服务端已验证临时内容，不允许 UI 拼接数据库路径
 | Views/Dashboard/PaymentDetailsView | 付款明细及共享付款维护路由 |
 | Stores/DashboardStore、Services/Statistics/StatisticsService | 请求管理、后台纯聚合 |
 | Views/Settings、Stores/SettingsStore、Services/SettingsService | 现有 Settings 场景扩展、设置统一来源 |
-| Views/DataExchange/CSVImportWizard、CSVExportSheet | 映射、预览、行错误、确认及结果 |
-| Services/DataExchange/CSVParser、CSVMapper、CSVService | 编解码、规范化、计划与事务提交 |
-| Views/DataExchange/BackupRestoreView、ResetConfirmationView | 备份进度、验证预览、独立确认 |
-| Services/DataExchange/BackupService、ArchiveClient、BackupValidator | 逻辑快照、ZIP 适配、安全校验 |
-| Services/DatasetCoordinator、Stores/DatasetLocator | 维护锁、活动指针、候选构建及恢复日志 |
+| Views/Settings/DataSettingsView、Views/DataExchange | 当前数据包入口、预览、确认及结果 |
+| Services/DataExchange、Stores/DataExchangeStore | package 编解码、校验、快照和事务合并 |
+| Services/DatasetCoordinator、Stores/DatasetLocator | iCloud 阶段再实现维护锁、候选构建和安全切换 |
 
-文件选择器使用 SwiftUI fileImporter/fileExporter 或窄范围平台适配器。业务接入时增加 `com.apple.security.files.user-selected.read-write` 沙盒权限，并成对管理安全作用域访问；不开放全盘、网络或云权限。图标、CSV、备份共用 AuthorizedFile 边界。
+文件选择器使用 SwiftUI fileImporter/fileExporter 或窄范围平台适配器。业务接入时增加 `com.apple.security.files.user-selected.read-write` 沙盒权限，并成对管理安全作用域访问；不开放全盘权限。图标和数据包共用 AuthorizedFile 边界。
 
 实施顺序：
 
 1. 在 Tab1 持久化及 Money/LocalDate 基础上实现统计纯聚合与全库快照；锁定周期/终生有效性与预估资格的区别、精度、互斥计数和实付边界。
 2. 完成统计 UI、币种选择、日期范围、明细和共享维护回调，验证不继承其他 Tab 筛选。
 3. 接入 app_settings、外观镜像、独立设置分区；与 Tab2 提醒授权和调度联调。
-4. 实现新旧 CSV 表头、周期/终生往返，再实现外部映射、逐行预览、UUID 更新及事务失败保护。
-5. 实现逻辑备份输出及验证器，再构建候选数据集恢复；通过故障注入后才开放整体替换与清空入口。
-6. 完成多窗口维护状态、进度、取消、文件权限、辅助功能及需求规模测试。
+4. 数据包功能维持完整导出与合并导入边界，不追加 CSV、复制导入或整体恢复入口。
+5. iCloud 阶段实现持久化 dataset revision、维护锁、合并器和候选数据集安全切换。
+6. 完成多窗口维护状态、文件权限、辅助功能及需求规模测试。
 
-全项目交付依赖为：Tab1 共享规则/存储 → Tab1 维护闭环 → Tab2 时间线与提醒、Tab3 统计 → CSV → 完整恢复/清空 → 三个 Tab 联合验收。文档没有要求同时搭建后端或引入新远程依赖。
+全项目交付依赖为：Tab1 共享规则/存储 → Tab1 维护闭环 → Tab2 时间线与提醒、Tab3 统计 → Periodic 数据包 → 三个 Tab 联合验收。iCloud 的写入协调与安全切换另按扩展规格分阶段落地。
 
 ## 9. 验收矩阵与失败路径
 
@@ -500,23 +499,17 @@ planID 指向服务端已验证临时内容，不允许 UI 拼接数据库路径
 | 实付边界 | 区间首尾包含；过期/停用订阅付款仍在；当前调价换币不改历史汇总 | AC-07、AC-10 |
 | 无记录与零元 | 无付款、区间无付款、存在零元付款三种状态不同 | AC-11、COST-06 |
 | 设置 | 多窗口版本冲突不覆盖；恢复后外观与提醒偏好来自新数据集；系统权限仍用本机 | NAV、BACKUP-05 |
-| CSV 往返 | 中文、逗号、双引号、内嵌换行、BOM、有/无前导单引号和公式前缀逐字段相等 | AC-16 |
-| CSV 坏数据 | 坏日期、金额精度、歧义币种、未知枚举、重复 ID 均定位；明确排除才能继续 | AC-17 |
-| CSV 更新 | 未映射保留，映射可空空值清空；历史/图片不变；同名不同 ID 不合并 | CSV-08、AC-17 |
-| CSV 事务 | 第 N 条写入时注入错误，库/版本/历史均不部分改变；同 operationID 重试不重复新增 | CSV-09 |
-| CSV 导出 | 全库与明确当前结果数量准确；已有目标文件写失败后仍完整 | CSV-01、QA-02 |
-| 完整备份 | 从一致版本输出订阅、周期、付款、用户模板、图片及设置，并保留可选周期关联；并发编辑不混快照 | BACKUP-01～02 |
-| 空库/已有库恢复 | 整体替换，用户 UUID、Decimal 金额和历史/图片保持；旧 datasetID 请求被拒绝 | AC-18 |
-| 拒绝坏备份 | 不兼容版本、缺图、坏摘要、孤立付款、重复 UUID、路径越界/链接均不碰旧库 | AC-19 |
-| 磁盘与崩溃 | 候选写失败、空间不足、指针替换前后终止，重启只有完整旧或新数据集 | BACKUP-04、AC-19 |
-| 清空 | 独立预览数量；全部业务空、设置默认、通知取消、系统授权不变 | BACKUP-06、AC-20 |
-| 后处理失败 | 通知/旧目录清理失败单独重试，不重复整体恢复或付款 | NOTIFY-05、BACKUP-05 |
+| 数据包往返 | Unicode、换行、金额、日期、终生、模板关系和图片逐字段相等 | AC-16、AC-28 |
+| 数据包坏数据 | 坏日期、金额精度、未知枚举、重复 ID、坏摘要、越界路径和链接均在写入前拒绝 | AC-17、AC-19 |
+| 数据包合并 | 新增、相同、冲突准确；同名不同 ID 不合并；历史和图片关系保持 | AC-17～18 |
+| 数据包事务 | 第 N 条写入时注入错误，库和历史均不部分改变 | EXCHANGE-05 |
+| 完整导出 | 从一致版本输出 V1 实体、用户模板、图片及设置白名单；并发编辑不混快照 | EXCHANGE-01～02 |
 | 原生和离线 | Cmd+,、键盘向导、VoiceOver 图表列表、深浅色/透明度、无产品网络访问 | AC-21～22 |
-| 数据规模 | 1,000 订阅 + 10,000 付款查询、聚合、CSV/备份有进度，无持续主线程卡顿 | QA-03、AC-22 |
+| 数据规模 | 1,000 订阅 + 10,000 付款查询、聚合和数据包操作无持续主线程卡顿 | QA-03、AC-22 |
 | 临期范围 | 默认 15，7/15/30 边界包含第 N 天；与 Tab2 共用 N 但此页始终全库 | AC-25 |
 | 终生费用 | active 计有效且细分终生；不计预估/分类年化；只填价格仍无实付，登记零元付款有笔数 | AC-26～27 |
-| 终生 CSV | 新列正确导出，cycle/expiry 留空、reminder=false；旧格式新建默认 recurring；冲突字段处理后才提交 | AC-28 |
-| 模板恢复 | 用户模板 UUID、建议金额、别名及共享图片完整恢复；清空后仅内置目录保留 | AC-28 |
+| 终生数据包 | billingKind、cycle/expiry、reminder 和冲突字段按领域规则往返 | AC-28 |
+| 模板导入 | 用户模板 UUID、建议金额、别名及共享图片完整恢复 | AC-28 |
 | 统计下钻 | 数量列表、图表参与者、币种实付明细均与同版本口径相等；返回不改共享 filter | AC-29 |
 | 周期与实付 | 跨年周期两年可见但实际支出只按付款年；手动周期报价不进入实付，删周期保留付款 | AC-31～33、AC-35 |
 | 历史备份 | periods.json 和可选 periodRecordID 正确往返；孤儿或跨订阅关联拒绝；跨年不复制；清空数量准确 | AC-36 |

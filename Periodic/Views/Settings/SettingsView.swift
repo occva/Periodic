@@ -8,6 +8,9 @@ struct SettingsView: View {
 
             ExchangeRateSettingsView()
                 .tabItem { Label("汇率", systemImage: "arrow.left.arrow.right") }
+
+            DataSettingsView()
+                .tabItem { Label("数据", systemImage: "externaldrive") }
         }
         .frame(width: 640, height: 560)
         .onAppear {

@@ -193,9 +193,6 @@ struct OverviewView: View {
                 Button("从服务模板新建") {
                     session.presentTemplateLibrary()
                 }
-                Divider()
-                Button("CSV 导入") {}
-                    .disabled(true)
             } label: {
                 Label("新建", systemImage: "plus")
             }

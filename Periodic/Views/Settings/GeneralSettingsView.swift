@@ -11,6 +11,8 @@ struct GeneralSettingsView: View {
     @AppStorage(PreferenceKey.menuBarDueHorizon) private var menuBarDueHorizon =
         MenuBarPreferences.defaultDueHorizon.rawValue
     @AppStorage(PreferenceKey.menuBarShowsForecasts) private var menuBarShowsForecasts = true
+    @AppStorage(PreferenceKey.defaultTimelineRange) private var defaultTimelineRange =
+        TimelinePreferences.defaultRange.rawValue
 
     var body: some View {
         Form {
@@ -21,6 +23,16 @@ struct GeneralSettingsView: View {
                     }
                 }
                 .accessibilityIdentifier("appearance-picker")
+
+                Picker("默认时间轴范围", selection: $defaultTimelineRange) {
+                    ForEach(TimelineRange.allCases) { range in
+                        Text(range.title).tag(range.rawValue)
+                    }
+                }
+
+                Text("新窗口会使用此范围；当前窗口已选择的范围保持不变。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("语言与地区") {
@@ -91,6 +103,9 @@ struct GeneralSettingsView: View {
         .formStyle(.grouped)
         .onAppear {
             menuBarDueHorizon = MenuBarPreferences.normalizedDueHorizonRawValue(menuBarDueHorizon)
+            defaultTimelineRange = TimelinePreferences.normalizedRangeRawValue(
+                defaultTimelineRange
+            )
         }
     }
 

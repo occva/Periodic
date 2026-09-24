@@ -50,6 +50,17 @@ enum AppLocalization {
 }
 
 enum AppPreferenceValues {
+    static var datasetID: UUID {
+        let defaults = UserDefaults.standard
+        if let rawValue = defaults.string(forKey: PreferenceKey.datasetID),
+           let value = UUID(uuidString: rawValue) {
+            return value
+        }
+        let value = UUID()
+        defaults.set(value.uuidString, forKey: PreferenceKey.datasetID)
+        return value
+    }
+
     static var defaultCurrency: CurrencyCode {
         let rawValue = UserDefaults.standard.string(forKey: PreferenceKey.defaultCurrency)
         return rawValue.flatMap(CurrencyCode.init(rawValue:)) ?? .cny
@@ -64,5 +75,15 @@ enum AppPreferenceValues {
     static var exchangeRateBaseCurrency: CurrencyCode {
         let rawValue = UserDefaults.standard.string(forKey: PreferenceKey.exchangeRateBaseCurrency)
         return rawValue.flatMap(CurrencyCode.init(rawValue:)) ?? .cny
+    }
+
+    static var defaultTimelineRange: TimelineRange {
+        let defaults = UserDefaults.standard
+        guard defaults.object(forKey: PreferenceKey.defaultTimelineRange) != nil else {
+            return TimelinePreferences.defaultRange
+        }
+        return TimelinePreferences.range(
+            for: defaults.integer(forKey: PreferenceKey.defaultTimelineRange)
+        )
     }
 }

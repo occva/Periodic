@@ -31,6 +31,47 @@ struct LocalDate: Hashable, Comparable, Codable, Sendable {
         return String(format: "%04d/%02d/%02d", components.year ?? 0, components.month ?? 0, components.day ?? 0)
     }
 
+    var iso8601Text: String {
+        let components = dateComponents
+        return String(
+            format: "%04d-%02d-%02d",
+            components.year ?? 0,
+            components.month ?? 0,
+            components.day ?? 0
+        )
+    }
+
+    init(iso8601Text: String) throws {
+        let parts = iso8601Text.split(separator: "-", omittingEmptySubsequences: false)
+        guard parts.count == 3,
+              let year = Int(parts[0]),
+              let month = Int(parts[1]),
+              let day = Int(parts[2]),
+              let date = Self.utcGregorian.date(
+                from: DateComponents(year: year, month: month, day: day)
+              ) else {
+            throw DecodingError.dataCorrupted(
+                .init(codingPath: [], debugDescription: "Invalid Gregorian date")
+            )
+        }
+        self.init(date, calendar: Self.utcGregorian)
+        guard self.iso8601Text == iso8601Text else {
+            throw DecodingError.dataCorrupted(
+                .init(codingPath: [], debugDescription: "Invalid Gregorian date")
+            )
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        try self.init(iso8601Text: container.decode(String.self))
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(iso8601Text)
+    }
+
     func date(calendar: Calendar = .current) -> Date {
         var localGregorian = Calendar(identifier: .gregorian)
         localGregorian.timeZone = calendar.timeZone

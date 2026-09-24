@@ -14,6 +14,7 @@ final class AppServices {
     let appleIconCache: AppleIconCache
     let exchangeRates: FrankfurterExchangeRateClient
     let renewalNotifications: RenewalNotificationService
+    let dataExchange: DataExchangeService?
     let builtinTemplateCategoryStore: BuiltinTemplateCategoryStore?
     let builtinTemplates: BuiltinTemplateCatalog?
     let modelContainer: ModelContainer?
@@ -54,12 +55,17 @@ final class AppServices {
             templateStore = TemplateStore(modelContainer: container)
             templateCategoryStore = TemplateCategoryStore(modelContainer: container)
             builtinTemplateCategoryStore = BuiltinTemplateCategoryStore(modelContainer: container)
+            dataExchange = DataExchangeService(
+                store: DataExchangeStore(modelContainer: container),
+                iconCache: appleIconCache
+            )
         } catch {
             modelContainer = nil
             subscriptionStore = nil
             templateStore = nil
             templateCategoryStore = nil
             builtinTemplateCategoryStore = nil
+            dataExchange = nil
             initializationError = PresentedError(error, title: "无法打开订阅数据")
         }
     }

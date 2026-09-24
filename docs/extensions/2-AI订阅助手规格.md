@@ -118,7 +118,7 @@ Provider 返回带 fact ID 引用的结构化解读
 | revision | Int64 | 多窗口编辑冲突检测 |
 | createdAt / updatedAt | Date | 审计时间 |
 
-API Key 和敏感 header 保存到 Keychain，使用仅本应用可访问的 access group；不进入 SwiftData、UserDefaults、iCloud 同步、CSV、普通备份或日志。删除 Provider 时同时删除对应 Keychain 项；失败则保留可重试清理状态。
+API Key 和敏感 header 保存到 Keychain，使用仅本应用可访问的 access group；不进入 SwiftData、UserDefaults、iCloud 同步、`.periodicdata` 数据包或日志。删除 Provider 时同时删除对应 Keychain 项；失败则保留可重试清理状态。
 
 ### 3.3 URL 与网络限制
 
@@ -157,7 +157,7 @@ API Key 和敏感 header 保存到 Keychain，使用仅本应用可访问的 acc
 
 用户可在生成前选择“包含订阅名称与逐项变化”，仅对本次报告授权。预览必须列出记录数量、字段种类、Provider 名称和 host。即使授权逐项数据，仍不发送备注正文、UndoEnvelope、图片、文件路径、对话或密钥。
 
-保存的报告记录以下来源信息：报告月份、事实快照摘要、生成时间、Provider ID、模型 ID、共享级别和输出版本；不复制 API Key。报告默认设备本地保存，和 AI 对话一样不进入 iCloud、CSV、`.periodicdata` 或变更记录正文。
+保存的报告记录以下来源信息：报告月份、事实快照摘要、生成时间、Provider ID、模型 ID、共享级别和输出版本；不复制 API Key。报告默认设备本地保存，和 AI 对话一样不进入 iCloud、`.periodicdata` 或变更记录正文。
 
 用户可以设置报告保留 3、6、12 个月或永久，默认 12 个月。到期清理只删除 AI 报告，不删除付款、订阅或 ChangeEvent，也不生成业务变更事件。
 

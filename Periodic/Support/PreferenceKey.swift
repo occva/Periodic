@@ -8,4 +8,6 @@ enum PreferenceKey {
     static let menuBarShowsForecasts = "menuBarShowsForecasts"
     static let exchangeRateBaseCurrency = "exchangeRateBaseCurrency"
     static let selectedCurrencies = "selectedCurrencies"
+    static let defaultTimelineRange = "defaultTimelineRange"
+    static let datasetID = "datasetID"
 }
