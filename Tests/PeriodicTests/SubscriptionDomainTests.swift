@@ -120,6 +120,166 @@ struct SubscriptionDomainTests {
         #expect(restoredComponents.day == 23)
     }
 
+    @Test func localDateMonthArithmeticClampsAtMonthEnd() throws {
+        let january31 = LocalDate(
+            try #require(
+                Calendar(identifier: .gregorian).date(
+                    from: DateComponents(year: 2028, month: 1, day: 31)
+                )
+            )
+        )
+
+        #expect(january31.addingMonths(1)?.displayText == "2028/02/29")
+        #expect(january31.addingMonths(13)?.displayText == "2029/02/28")
+    }
+
+    @Test func automaticRenewalBecomesConfirmableOnExpiryDay() throws {
+        let expiry = LocalDate.today
+        let subscription = makeRenewingSubscription(expiry: expiry)
+
+        #expect(throws: SubscriptionRenewalRule.RuleError.self) {
+            try SubscriptionRenewalRule.preview(
+                subscription: subscription,
+                referenceDate: try #require(expiry.addingDays(-1))
+            )
+        }
+
+        let preview = try SubscriptionRenewalRule.preview(
+            subscription: subscription,
+            referenceDate: expiry
+        )
+        #expect(preview.nextStart == expiry.addingDays(1))
+        #expect(preview.nextExpiry == preview.nextStart.addingMonths(1)?.addingDays(-1))
+    }
+
+    @Test func renewalNotificationPlansFutureExpiryAtNineAM() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try #require(TimeZone(identifier: "Asia/Shanghai"))
+        let referenceDate = LocalDate(
+            try #require(
+                calendar.date(from: DateComponents(year: 2026, month: 9, day: 24))
+            ),
+            calendar: calendar
+        )
+        let expiry = try #require(referenceDate.addingDays(1))
+        let now = try #require(
+            calendar.date(
+                from: DateComponents(year: 2026, month: 9, day: 24, hour: 12)
+            )
+        )
+
+        let plans = RenewalNotificationPlan.plans(
+            subscriptions: [makeRenewingSubscription(expiry: expiry)],
+            referenceDate: referenceDate,
+            calendar: calendar,
+            now: now
+        )
+
+        #expect(plans.count == 1)
+        #expect(plans.first?.deliveryComponents.hour == 9)
+        #expect(plans.first?.deliveryComponents.day == 25)
+    }
+
+    @Test func renewalNotificationIdentityRemainsActiveAfterDeliveryTime() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try #require(TimeZone(identifier: "Asia/Shanghai"))
+        let referenceDate = LocalDate(
+            try #require(
+                calendar.date(from: DateComponents(year: 2026, month: 9, day: 24))
+            ),
+            calendar: calendar
+        )
+        let subscription = makeRenewingSubscription(expiry: referenceDate)
+        let afterDelivery = try #require(
+            calendar.date(
+                from: DateComponents(year: 2026, month: 9, day: 24, hour: 12)
+            )
+        )
+
+        #expect(
+            RenewalNotificationPlan.plans(
+                subscriptions: [subscription],
+                referenceDate: referenceDate,
+                calendar: calendar,
+                now: afterDelivery
+            ).isEmpty
+        )
+        #expect(
+            RenewalNotificationPlan.activeIdentifiers(
+                subscriptions: [subscription],
+                referenceDate: referenceDate
+            ) == Set([
+                RenewalNotificationPlan.identifier(
+                    subscriptionID: subscription.id,
+                    expiry: referenceDate
+                )
+            ])
+        )
+    }
+
+    @Test func renewalNotificationCleanupOnlyRemovesStaleManagedIdentifiers() {
+        let active = RenewalNotificationPlan.identifierPrefix + "active"
+        let stale = RenewalNotificationPlan.identifierPrefix + "stale"
+        let unrelated = "another-app.notification"
+
+        #expect(
+            RenewalNotificationPlan.staleManagedIdentifiers(
+                in: [active, stale, unrelated],
+                activeIdentifiers: [active]
+            ) == [stale]
+        )
+    }
+
+    @MainActor
+    @Test func confirmingAutomaticRenewalUpdatesCurrentPeriodAndAppendsHistoryOnce() async throws {
+        let controller = PersistenceController()
+        let container = try controller.makeContainer(
+            schema: Schema([SubscriptionRecord.self, SubscriptionPeriodRecord.self]),
+            inMemory: true
+        )
+        let store = SubscriptionStore(modelContainer: container)
+        let expiry = LocalDate.today
+        let input = SubscriptionCreateInput(
+            id: UUID(),
+            name: "Renewing",
+            symbolName: "arrow.clockwise",
+            iconResourceName: nil,
+            iconURLString: nil,
+            category: .tools,
+            managementState: .active,
+            billingKind: .recurring,
+            periodStart: try #require(expiry.addingMonths(0)?.addingDays(-29)),
+            expiry: expiry,
+            cycleMonths: 1,
+            money: Money(minorUnits: 2_000, currency: .usd),
+            note: "",
+            reminderEnabled: true,
+            automaticallyRenews: true
+        )
+        _ = try await store.create(input)
+        let current = try #require(try await store.fetchAll().first)
+        let request = SubscriptionRenewalRequest(
+            subscriptionID: current.id,
+            expectedRevision: current.revision,
+            expectedExpiry: expiry
+        )
+
+        let preview = try await store.confirmAutomaticRenewal(request, referenceDate: expiry)
+        let updated = try #require(try await store.fetchAll().first)
+        let periods = try await store.fetchPeriods(for: current.id)
+
+        #expect(updated.periodStart == preview.nextStart)
+        #expect(updated.expiry == preview.nextExpiry)
+        #expect(updated.revision == current.revision + 1)
+        #expect(periods.count == 2)
+        #expect(periods.first?.source == .initial)
+        #expect(periods.last?.source == .renewal)
+        await #expect(throws: SubscriptionStore.StoreError.self) {
+            try await store.confirmAutomaticRenewal(request, referenceDate: expiry)
+        }
+        #expect(try await store.fetchPeriods(for: current.id).count == 2)
+    }
+
     @MainActor
     @Test func invalidSubscriptionDoesNotHideValidSubscriptions() async throws {
         let controller = PersistenceController()
@@ -314,6 +474,8 @@ struct SubscriptionDomainTests {
 
         let periods = try await store.fetchPeriods(for: subscriptionID)
         #expect(periods.count == 2)
+        #expect(periods.first?.source == .initial)
+        #expect(periods.last?.source == .manual)
         #expect(periods.last?.start == recorded.periodStart)
         #expect(periods.last?.end == recorded.expiry)
         let finalSubscription = try #require(try await store.fetchAll().first)
@@ -352,6 +514,7 @@ struct SubscriptionDomainTests {
         #expect(try await store.backfillLifetimePeriods() == 0)
         let period = try #require(try await store.fetchPeriods(for: subscriptionID).first)
         #expect(period.end == .defaultLifetimeHistoryEnd)
+        #expect(period.source == .initial)
     }
 
     @MainActor
@@ -648,5 +811,28 @@ struct SubscriptionDomainTests {
 
         #expect(first == second)
         #expect(!first.isEmpty)
+    }
+
+    private func makeRenewingSubscription(expiry: LocalDate) -> SubscriptionDTO {
+        SubscriptionDTO(
+            id: UUID(),
+            name: "Renewing",
+            symbolName: "arrow.clockwise",
+            iconResourceName: nil,
+            iconURLString: nil,
+            category: .tools,
+            managementState: .active,
+            billingKind: .recurring,
+            periodStart: expiry.addingDays(-29),
+            expiry: expiry,
+            cycleMonths: 1,
+            money: Money(minorUnits: 2_000, currency: .usd),
+            note: "",
+            reminderEnabled: true,
+            automaticallyRenews: true,
+            revision: 1,
+            createdAt: .now,
+            updatedAt: .now
+        )
     }
 }

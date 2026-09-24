@@ -14,6 +14,7 @@ struct SubscriptionListItem: Identifiable, Hashable, Sendable {
     let cycleMonths: Int?
     let money: Money
     let note: String
+    let automaticallyRenews: Bool
 
     init(dto: SubscriptionDTO) {
         id = dto.id
@@ -29,6 +30,7 @@ struct SubscriptionListItem: Identifiable, Hashable, Sendable {
         cycleMonths = dto.cycleMonths
         money = dto.money
         note = dto.note
+        automaticallyRenews = dto.automaticallyRenews
     }
 
     var managementStatus: String {
@@ -64,16 +66,6 @@ struct SubscriptionListItem: Identifiable, Hashable, Sendable {
 
     var remainingDays: String { remainingDayCount.map(String.init) ?? "—" }
 
-    func remainingProgress(relativeTo referenceDate: LocalDate) -> Double? {
-        guard billingKindValue == .recurring,
-              let periodStart,
-              let expiry else { return nil }
-        let totalDayCount = expiry.dayNumber - periodStart.dayNumber + 1
-        guard totalDayCount > 0 else { return nil }
-        let remaining = expiry.dayNumber - referenceDate.dayNumber + 1
-        return min(max(Double(remaining) / Double(totalDayCount), 0), 1)
-    }
-
     func remainingDaysProgress(
         relativeTo referenceDate: LocalDate,
         fullScaleDays: Int = 100
@@ -99,7 +91,11 @@ struct SubscriptionListItem: Identifiable, Hashable, Sendable {
         case 0: AppLocalization.string("今天到期")
         case 1...7: AppLocalization.string("7 天内")
         case 8...30: AppLocalization.string("30 天内")
-        default: AppLocalization.string("正常")
+        default:
+            String(
+                format: AppLocalization.string("%d 天内"),
+                days
+            )
         }
     }
 

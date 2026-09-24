@@ -18,6 +18,7 @@ final class WindowSession {
     var timelineManagementState: ManagementState?
     var timelineBillingKind: BillingKind?
     private(set) var referenceDate: LocalDate
+    private(set) var exchangeRateRefreshRevision = 0
     private(set) var isPresentingSubscriptionEditor = false
     private(set) var isPresentingSubscriptionDetail = false
     private(set) var isPresentingTemplateLibrary = false
@@ -84,6 +85,26 @@ final class WindowSession {
 
     var dashboardUpcomingItems: [SubscriptionListItem] {
         analytics.upcomingItems(within: dueHorizon.rawValue)
+    }
+
+    var dashboardActiveSubscriptionItems: [SubscriptionListItem] {
+        items
+            .filter { analytics.status(of: $0) == .effectiveRecurring }
+            .sorted(by: expiryAscending)
+    }
+
+    var automaticRenewalDueItems: [SubscriptionListItem] {
+        items.filter { item in
+            guard item.managementState == .active,
+                  item.billingKindValue == .recurring,
+                  item.automaticallyRenews,
+                  let expiry = item.expiry,
+                  let cycleMonths = item.cycleMonths else {
+                return false
+            }
+            return cycleMonths > 0 && expiry <= referenceDate
+        }
+        .sorted(by: expiryAscending)
     }
 
     var editingSubscription: SubscriptionDTO? {
@@ -155,23 +176,24 @@ final class WindowSession {
         overviewCurrency = nil
     }
 
-    func refreshReferenceDate(_ date: LocalDate = .today) {
-        referenceDate = date
-    }
-
     func reload(using services: AppServices) async {
+        referenceDate = .today
+        exchangeRateRefreshRevision &+= 1
         guard let store = services.subscriptionStore else {
             loadError = services.initializationError
             hasLoadedSubscriptions = true
             return
         }
 
-        referenceDate = .today
         isLoading = true
         defer { isLoading = false }
         do {
             subscriptions = try await store.fetchAll()
             items = subscriptions.map(SubscriptionListItem.init(dto:))
+            await services.reconcileRenewalNotifications(
+                subscriptions: subscriptions,
+                referenceDate: referenceDate
+            )
             loadError = nil
         } catch {
             loadError = PresentedError(error, title: "无法读取订阅")

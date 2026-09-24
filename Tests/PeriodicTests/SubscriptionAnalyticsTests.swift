@@ -120,7 +120,22 @@ struct SubscriptionAnalyticsTests {
 
         #expect(item.managementState == .active)
         #expect(item.managementStatus(relativeTo: anchor) == "已过期")
-        #expect(item.remainingProgress(relativeTo: anchor) == 0)
+        #expect(item.expiryStatus(relativeTo: anchor) == "已过期")
+        #expect(item.remainingDaysProgress(relativeTo: anchor) == 0)
+    }
+
+    @Test func expiryStatusUsesExactRelativeDayCount() {
+        let today = makeListItem(makeInput(name: "今天", expiry: anchor))
+        let near = makeListItem(
+            makeInput(name: "临期", expiry: LocalDate(dayNumber: anchor.dayNumber + 7))
+        )
+        let far = makeListItem(
+            makeInput(name: "远期", expiry: LocalDate(dayNumber: anchor.dayNumber + 61))
+        )
+
+        #expect(today.expiryStatus(relativeTo: anchor) == "今天到期")
+        #expect(near.expiryStatus(relativeTo: anchor) == "7 天内")
+        #expect(far.expiryStatus(relativeTo: anchor) == "61 天内")
     }
 
     @Test func tableProgressUsesAbsoluteRemainingDaysOnHundredDayScale() {
@@ -155,6 +170,33 @@ struct SubscriptionAnalyticsTests {
         #expect(expired.remainingDaysProgress(relativeTo: anchor) == 0)
     }
 
+    @Test func categoryForecastGroupsMergeCurrenciesAndConvertOnlyTheSummary() throws {
+        let items = [
+            makeListItem(makeInput(name: "人民币工具", expiry: anchor, currency: .cny)),
+            makeListItem(makeInput(name: "美元工具", expiry: anchor, currency: .usd)),
+            makeListItem(
+                makeInput(name: "影音", expiry: anchor, currency: .cny, category: .media)
+            ),
+        ]
+        let analytics = SubscriptionAnalytics(items: items, referenceDate: anchor)
+        let tools = try #require(
+            analytics.categoryForecastGroups.first { $0.category == .tools }
+        )
+        let quote = ExchangeRateQuote(
+            baseCurrency: .cny,
+            date: "2026-01-15",
+            ratesPerBaseUnit: [.cny: 1, .usd: Decimal(1) / Decimal(10)],
+            isStale: false,
+            source: .frankfurter
+        )
+
+        #expect(analytics.categoryForecastGroups.count == 2)
+        #expect(tools.forecasts.count == 2)
+        #expect(Set(tools.forecasts.map(\.currency)) == [.cny, .usd])
+        #expect(quote.annualTotal(forecasts: tools.forecasts) == 1_320)
+        #expect(items.map(\.money.currency) == [.cny, .usd, .cny])
+    }
+
     @MainActor
     @Test func tableDefaultsToRemainingDaysFromPositiveToNegative() async throws {
         let services = AppServices(inMemory: true)
@@ -172,6 +214,43 @@ struct SubscriptionAnalyticsTests {
         await session.reload(using: services)
 
         #expect(session.filteredItems.map(\.remainingDayCount) == [30, 7, 0, -5])
+    }
+
+    @MainActor
+    @Test func dashboardActiveSubscriptionsAreNotLimitedByDueHorizon() async throws {
+        let services = AppServices(inMemory: true)
+        let store = try #require(services.subscriptionStore)
+        let today = LocalDate.today
+        let near = makeInput(
+            name: "临期",
+            expiry: LocalDate(dayNumber: today.dayNumber + 7)
+        )
+        let far = makeInput(
+            name: "远期",
+            expiry: LocalDate(dayNumber: today.dayNumber + 365)
+        )
+        try await store.create([near, far])
+
+        let session = WindowSession(referenceDate: today)
+        session.dueHorizon = .thirtyDays
+        await session.reload(using: services)
+
+        #expect(session.dashboardActiveSubscriptionItems.map(\.name) == ["临期", "远期"])
+        #expect(session.dashboardUpcomingItems.map(\.name) == ["临期"])
+    }
+
+    @MainActor
+    @Test func reloadingSessionAdvancesExchangeRateRefreshRevision() async {
+        let services = AppServices(inMemory: true)
+        let session = WindowSession()
+        let initialRevision = session.exchangeRateRefreshRevision
+
+        await session.reload(using: services)
+        let firstReloadRevision = session.exchangeRateRefreshRevision
+        await session.reload(using: services)
+
+        #expect(firstReloadRevision == initialRevision + 1)
+        #expect(session.exchangeRateRefreshRevision == firstReloadRevision + 1)
     }
 
     @MainActor
@@ -237,20 +316,25 @@ struct SubscriptionAnalyticsTests {
         #expect(periods.map(\.start) == periods.map(\.start).sorted())
     }
 
-    private func makeInput(name: String, expiry: LocalDate) -> SubscriptionCreateInput {
+    private func makeInput(
+        name: String,
+        expiry: LocalDate,
+        currency: CurrencyCode = .cny,
+        category: ServiceCategory = .tools
+    ) -> SubscriptionCreateInput {
         SubscriptionCreateInput(
             id: UUID(),
             name: name,
             symbolName: "calendar",
             iconResourceName: nil,
             iconURLString: nil,
-            category: .tools,
+            category: category,
             managementState: .active,
             billingKind: .recurring,
             periodStart: LocalDate(dayNumber: expiry.dayNumber - 29),
             expiry: expiry,
             cycleMonths: 1,
-            money: Money(minorUnits: 1_000, currency: .cny),
+            money: Money(minorUnits: 1_000, currency: currency),
             note: "",
             reminderEnabled: true
         )

@@ -37,6 +37,39 @@ struct LocalDate: Hashable, Comparable, Codable, Sendable {
         return localGregorian.date(from: dateComponents) ?? Self.epoch
     }
 
+    func addingDays(_ days: Int) -> LocalDate? {
+        let (value, overflow) = dayNumber.addingReportingOverflow(days)
+        return overflow ? nil : LocalDate(dayNumber: value)
+    }
+
+    func addingMonths(_ months: Int) -> LocalDate? {
+        guard months >= 0 else { return nil }
+        let components = dateComponents
+        guard let year = components.year,
+              let month = components.month,
+              let day = components.day else {
+            return nil
+        }
+        let (zeroBasedMonth, monthOverflow) = (month - 1).addingReportingOverflow(months)
+        guard !monthOverflow else { return nil }
+        let (targetYear, yearOverflow) = year.addingReportingOverflow(zeroBasedMonth / 12)
+        guard !yearOverflow else { return nil }
+        let targetMonth = zeroBasedMonth % 12 + 1
+        guard let firstOfTargetMonth = Self.utcGregorian.date(
+            from: DateComponents(year: targetYear, month: targetMonth, day: 1)
+        ), let dayRange = Self.utcGregorian.range(of: .day, in: .month, for: firstOfTargetMonth),
+              let target = Self.utcGregorian.date(
+                from: DateComponents(
+                    year: targetYear,
+                    month: targetMonth,
+                    day: min(day, dayRange.count)
+                )
+              ) else {
+            return nil
+        }
+        return LocalDate(target, calendar: Self.utcGregorian)
+    }
+
     private var dateComponents: DateComponents {
         let date = Self.utcGregorian.date(byAdding: .day, value: dayNumber, to: Self.epoch)
             ?? Self.epoch

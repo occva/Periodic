@@ -19,6 +19,7 @@ final class SubscriptionRecord {
     var currencyScale: Int
     var note: String
     var reminderEnabled: Bool
+    var automaticallyRenews: Bool = false
     var revision: Int64
     var createdAt: Date
     var updatedAt: Date
@@ -40,6 +41,7 @@ final class SubscriptionRecord {
         currencyScale = input.money.currency.scale
         note = input.note
         reminderEnabled = input.reminderEnabled
+        automaticallyRenews = input.automaticallyRenews
         revision = 1
         createdAt = now
         updatedAt = now
@@ -61,11 +63,24 @@ final class SubscriptionRecord {
         currencyScale = input.money.currency.scale
         note = input.note
         reminderEnabled = input.reminderEnabled
+        automaticallyRenews = input.automaticallyRenews
         revision += 1
         updatedAt = now
     }
 
     func markHistoryChanged(now: Date = Date()) {
+        revision += 1
+        updatedAt = now
+    }
+
+    func applyRenewal(
+        start: LocalDate,
+        expiry: LocalDate,
+        now: Date = Date()
+    ) {
+        managementStateRaw = ManagementState.active.rawValue
+        periodStartDay = start.dayNumber
+        expiryDay = expiry.dayNumber
         revision += 1
         updatedAt = now
     }

@@ -13,6 +13,7 @@ final class AppServices {
     let appleIconSearch: AppleIconSearchClient
     let appleIconCache: AppleIconCache
     let exchangeRates: FrankfurterExchangeRateClient
+    let renewalNotifications: RenewalNotificationService
     let builtinTemplateCategoryStore: BuiltinTemplateCategoryStore?
     let builtinTemplates: BuiltinTemplateCatalog?
     let modelContainer: ModelContainer?
@@ -30,6 +31,7 @@ final class AppServices {
         appleIconSearch = AppleIconSearchClient()
         appleIconCache = AppleIconCache()
         exchangeRates = FrankfurterExchangeRateClient()
+        renewalNotifications = RenewalNotificationService()
         do {
             builtinTemplates = try BuiltinTemplateCatalog.load()
         } catch {
@@ -95,5 +97,15 @@ final class AppServices {
 
     func notifyTemplateDataChanged() {
         templateDataVersion &+= 1
+    }
+
+    func reconcileRenewalNotifications(
+        subscriptions: [SubscriptionDTO],
+        referenceDate: LocalDate = .today
+    ) async {
+        await renewalNotifications.reconcile(
+            subscriptions: subscriptions,
+            referenceDate: referenceDate
+        )
     }
 }

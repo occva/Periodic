@@ -3,6 +3,7 @@ import Observation
 
 enum MainWindowRoute: Equatable, Sendable {
     case dashboard(dueHorizon: DueHorizon?)
+    case overview
     case subscriptionDetails(UUID)
     case newSubscription
     case templateLibrary

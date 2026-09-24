@@ -25,6 +25,7 @@ struct SubscriptionEditorView: View {
     @State private var hasExpiryDate = false
     @State private var expiryDate = Date()
     @State private var reminderEnabled = true
+    @State private var automaticallyRenews = false
     @State private var note = ""
     @State private var isSaving = false
     @State private var isPresentingIconPicker = false
@@ -63,6 +64,7 @@ struct SubscriptionEditorView: View {
         _hasExpiryDate = State(initialValue: subscription?.expiry != nil)
         _expiryDate = State(initialValue: subscription?.expiry?.date() ?? Date())
         _reminderEnabled = State(initialValue: subscription?.reminderEnabled ?? true)
+        _automaticallyRenews = State(initialValue: subscription?.automaticallyRenews ?? false)
         _note = State(initialValue: subscription?.note ?? "")
     }
 
@@ -181,6 +183,12 @@ struct SubscriptionEditorView: View {
                 Section("提醒与备注") {
                     if billingKind == .recurring {
                         Toggle("到期提醒", isOn: $reminderEnabled)
+                        Toggle("服务商自动续费", isOn: $automaticallyRenews)
+                            .disabled(managementState != .active)
+                            .accessibilityHint("到期日提醒确认，Periodic 不会自动扣款或延长周期")
+                        Text("到期日会进入待确认列表；确认已续费后，才会生成下一周期记录。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
 
                     TextField("备注", text: $note, axis: .vertical)
@@ -219,8 +227,19 @@ struct SubscriptionEditorView: View {
             if kind == .lifetime {
                 hasExpiryDate = false
                 reminderEnabled = false
+                automaticallyRenews = false
             } else {
                 reminderEnabled = true
+            }
+        }
+        .onChange(of: automaticallyRenews) { _, isEnabled in
+            if isEnabled {
+                hasExpiryDate = true
+            }
+        }
+        .onChange(of: managementState) { _, state in
+            if state != .active {
+                automaticallyRenews = false
             }
         }
         .errorAlert($error)
@@ -342,7 +361,11 @@ struct SubscriptionEditorView: View {
             cycleMonths: billingKind == .recurring ? billingCycle.rawValue : nil,
             money: money,
             note: note,
-            reminderEnabled: billingKind == .recurring && reminderEnabled
+            reminderEnabled: billingKind == .recurring && reminderEnabled,
+            automaticallyRenews: billingKind == .recurring
+                && managementState == .active
+                && hasExpiryDate
+                && automaticallyRenews
         )
     }
 }

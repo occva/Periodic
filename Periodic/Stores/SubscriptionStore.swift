@@ -128,7 +128,7 @@ actor SubscriptionStore {
                     )
                 }
             case .appendPeriodRecord:
-                guard let period = initialPeriod(for: input) else {
+                guard let period = initialPeriod(for: input, source: .manual) else {
                     throw StoreError.incompletePeriodDates
                 }
                 modelContext.insert(SubscriptionPeriodRecord(input: period))
@@ -193,6 +193,51 @@ actor SubscriptionStore {
         }
     }
 
+    func confirmAutomaticRenewal(
+        _ request: SubscriptionRenewalRequest,
+        referenceDate: LocalDate = .today
+    ) throws -> SubscriptionRenewalPreview {
+        do {
+            let subscriptionID = request.subscriptionID
+            var descriptor = FetchDescriptor<SubscriptionRecord>(
+                predicate: #Predicate { $0.id == subscriptionID }
+            )
+            descriptor.fetchLimit = 1
+            guard let record = try modelContext.fetch(descriptor).first else {
+                throw StoreError.notFound
+            }
+            guard record.revision == request.expectedRevision,
+                  record.expiryDay == request.expectedExpiry.dayNumber else {
+                throw StoreError.revisionConflict
+            }
+
+            let preview = try SubscriptionRenewalRule.preview(
+                subscription: makeDTO(record),
+                referenceDate: referenceDate
+            )
+            modelContext.insert(
+                SubscriptionPeriodRecord(
+                    input: SubscriptionPeriodCreateInput(
+                        id: UUID(),
+                        subscriptionID: record.id,
+                        billingKind: .recurring,
+                        cycleMonths: preview.cycleMonths,
+                        start: preview.nextStart,
+                        end: preview.nextExpiry,
+                        money: preview.money,
+                        source: .renewal
+                    )
+                )
+            )
+            record.applyRenewal(start: preview.nextStart, expiry: preview.nextExpiry)
+            try modelContext.save()
+            return preview
+        } catch {
+            modelContext.rollback()
+            throw error
+        }
+    }
+
     /// Completes the lifetime-history invariant for data created before the
     /// app began materializing a bounded lifetime period automatically.
     func backfillLifetimePeriods() throws -> Int {
@@ -231,7 +276,8 @@ actor SubscriptionStore {
                     money: Money(
                         minorUnits: subscription.periodAmountMinor,
                         currency: currency
-                    )
+                    ),
+                    source: .initial
                 )
                 modelContext.insert(SubscriptionPeriodRecord(input: period))
                 subscriptionIDsWithLifetimePeriod.insert(subscription.id)
@@ -278,6 +324,7 @@ actor SubscriptionStore {
             money: Money(minorUnits: record.periodAmountMinor, currency: currency),
             note: record.note,
             reminderEnabled: record.reminderEnabled,
+            automaticallyRenews: record.automaticallyRenews,
             revision: record.revision,
             createdAt: record.createdAt,
             updatedAt: record.updatedAt
@@ -292,6 +339,9 @@ actor SubscriptionStore {
               currency.scale == record.currencyScale else {
             throw StoreError.invalidStoredValue("period.currencyCode")
         }
+        guard let source = SubscriptionPeriodSource(rawValue: record.sourceRaw) else {
+            throw StoreError.invalidStoredValue("period.sourceRaw")
+        }
         return SubscriptionPeriodDTO(
             id: record.id,
             subscriptionID: record.subscriptionID,
@@ -300,13 +350,15 @@ actor SubscriptionStore {
             start: LocalDate(dayNumber: record.startDay),
             end: record.endDay.map(LocalDate.init(dayNumber:)),
             money: Money(minorUnits: record.amountMinor, currency: currency),
+            source: source,
             createdAt: record.createdAt
         )
     }
 
     private func initialPeriod(
         for input: SubscriptionCreateInput,
-        fallbackStart: LocalDate = .today
+        fallbackStart: LocalDate = .today,
+        source: SubscriptionPeriodSource = .initial
     ) -> SubscriptionPeriodCreateInput? {
         switch input.billingKind {
         case .recurring:
@@ -318,7 +370,8 @@ actor SubscriptionStore {
                 cycleMonths: input.cycleMonths,
                 start: start,
                 end: expiry,
-                money: input.money
+                money: input.money,
+                source: source
             )
         case .lifetime:
             return SubscriptionPeriodCreateInput(
@@ -328,7 +381,8 @@ actor SubscriptionStore {
                 cycleMonths: nil,
                 start: input.periodStart ?? fallbackStart,
                 end: .defaultLifetimeHistoryEnd,
-                money: input.money
+                money: input.money,
+                source: source
             )
         }
     }
@@ -349,7 +403,11 @@ actor SubscriptionStore {
         guard try modelContext.fetch(descriptor).isEmpty else {
             return
         }
-        guard let period = initialPeriod(for: input, fallbackStart: fallbackStart) else { return }
+        guard let period = initialPeriod(
+            for: input,
+            fallbackStart: fallbackStart,
+            source: .manual
+        ) else { return }
         modelContext.insert(SubscriptionPeriodRecord(input: period))
     }
 }

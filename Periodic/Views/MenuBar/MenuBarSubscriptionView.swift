@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct MenuBarSubscriptionView: View {
+    @Environment(\.dismiss) private var dismiss
     @Environment(\.openWindow) private var openWindow
     @Environment(\.currencyDisplayStyle) private var currencyDisplayStyle
     @AppStorage(PreferenceKey.menuBarDueHorizon) private var dueHorizonRaw =
@@ -148,20 +149,19 @@ struct MenuBarSubscriptionView: View {
                 }
             }
 
-            if upcomingItemsInSelectedRange.count > visibleUpcomingItems.count {
-                Button {
-                    openMainWindow(.dashboard(dueHorizon: dueHorizon))
-                } label: {
-                    HStack(spacing: 4) {
-                        Text("查看全部 \(upcomingItemsInSelectedRange.count) 项")
-                        Image(systemName: "chevron.right")
-                            .font(.caption2.weight(.semibold))
-                    }
-                    .foregroundStyle(.primary)
+            Button {
+                openMainWindow(.overview)
+            } label: {
+                HStack(spacing: 4) {
+                    Text("查看全部服务")
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.semibold))
                 }
-                .buttonStyle(.plain)
-                .font(.caption)
+                .foregroundStyle(.primary)
             }
+            .buttonStyle(.plain)
+            .font(.caption)
+            .accessibilityHint("打开表格视图")
         }
     }
 
@@ -309,7 +309,9 @@ struct MenuBarSubscriptionView: View {
     }
 
     private func openMainWindow(_ route: MainWindowRoute) {
+        dismiss()
         guard !windowRouter.request(route) else { return }
+        windowRouter.activateApplication()
         openWindow(id: AppConfiguration.mainWindowID)
     }
 

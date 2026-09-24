@@ -2,32 +2,48 @@ import SwiftUI
 
 struct DashboardView: View {
     @Bindable var session: WindowSession
+    @Environment(AppServices.self) private var services
     @Environment(\.currencyDisplayStyle) private var currencyDisplayStyle
-    @State private var expandedCategoryForecasts = Set<CategoryForecast.ID>()
+    @AppStorage(PreferenceKey.exchangeRateBaseCurrency) private var baseCurrency = CurrencyCode.cny
+    @State private var feature = DashboardFeature()
+    @State private var expandedCategories = Set<ServiceCategory>()
+    @State private var upcomingScope = DashboardUpcomingScope.active
 
     private var analytics: SubscriptionAnalytics { session.analytics }
 
     var body: some View {
-        ScrollView {
-            GlassEffectContainer(spacing: 16) {
-                VStack(alignment: .leading, spacing: 20) {
-                    overviewSection
-                    Grid(horizontalSpacing: 16, verticalSpacing: 16) {
-                        GridRow {
-                            forecastCard
-                            upcomingCard
-                        }
-                        GridRow {
-                            categoryCard
-                                .gridCellColumns(2)
-                        }
+        ViewThatFits(in: .vertical) {
+            dashboardContent
+            ScrollView {
+                dashboardContent
+            }
+            .scrollIndicators(.hidden)
+        }
+        .toolbar { toolbarContent }
+        .task(id: categoryExchangeRateRequestID) {
+            await loadCategoryExchangeRates()
+        }
+        .accessibilityIdentifier("dashboard-page")
+    }
+
+    private var dashboardContent: some View {
+        GlassEffectContainer(spacing: 16) {
+            VStack(alignment: .leading, spacing: 20) {
+                overviewSection
+                Grid(horizontalSpacing: 16, verticalSpacing: 16) {
+                    GridRow {
+                        forecastCard
+                        upcomingCard
+                    }
+                    GridRow {
+                        categoryCard
+                            .gridCellColumns(2)
                     }
                 }
             }
-            .padding(20)
         }
-        .toolbar { toolbarContent }
-        .accessibilityIdentifier("dashboard-page")
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
     @ToolbarContentBuilder
@@ -53,137 +69,185 @@ struct DashboardView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("概况").font(.title2.weight(.semibold))
             HStack(alignment: .top, spacing: 12) {
-                SummaryMetricCard(title: "全库总数", value: "\(session.items.count)", symbol: "rectangle.stack")
-                    .accessibilityElement(children: .combine)
-                    .accessibilityIdentifier("dashboard-total-count")
                 SummaryMetricCard(
                     title: "当前有效",
                     value: "\(analytics.effectiveRecurringCount + analytics.effectiveLifetimeCount)",
                     detail: "周期 \(analytics.effectiveRecurringCount) · 终生 \(analytics.effectiveLifetimeCount)",
                     symbol: "checkmark.circle"
                 )
+                SummaryMetricCard(
+                    title: "本月预估",
+                    value: monthlyForecastText,
+                    symbol: "banknote"
+                )
+                .help(monthlyForecastHelp)
                 SummaryMetricCard(title: "已过期", value: "\(analytics.expiredCount)", symbol: "exclamationmark.circle")
-                SummaryMetricCard(title: "已停用", value: "\(analytics.inactiveCount)", symbol: "pause.circle")
-                SummaryMetricCard(title: "日期未知", value: "\(analytics.unknownDateCount)", symbol: "questionmark.circle")
+                SummaryMetricCard(
+                    title: "待确认",
+                    value: "\(session.automaticRenewalDueItems.count)",
+                    detail: "到期自动续费",
+                    symbol: "checkmark.message"
+                )
             }
         }
     }
 
     private var forecastCard: some View {
         DashboardCard(title: "预估费用", symbol: "banknote") {
-            if currencyForecasts.isEmpty {
-                Text("暂无费用数据")
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, minHeight: 90, alignment: .center)
-            } else {
-                VStack(spacing: 0) {
-                    ForEach(currencyForecasts) { forecast in
-                        HStack(alignment: .firstTextBaseline, spacing: 12) {
-                            Text(currencyDisplayStyle.label(for: forecast.currency))
-                                .font(.headline)
-                            Spacer()
-                            VStack(alignment: .trailing, spacing: 4) {
-                                Text(
-                                    "月均 \(Money.display(forecast.monthly, currency: forecast.currency, style: currencyDisplayStyle))"
-                                )
-                                Text(
-                                    "年化 \(Money.display(forecast.annual, currency: forecast.currency, style: currencyDisplayStyle))"
-                                )
-                                    .foregroundStyle(.secondary)
+            Group {
+                if currencyForecasts.isEmpty {
+                    Text("暂无费用数据")
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                } else {
+                    ScrollView {
+                        LazyVStack(spacing: 0) {
+                            ForEach(currencyForecasts) { forecast in
+                                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                                    Text(currencyDisplayStyle.label(for: forecast.currency))
+                                        .font(.headline)
+                                    Spacer()
+                                    VStack(alignment: .trailing, spacing: 4) {
+                                        Text(
+                                            "月均 \(Money.display(forecast.monthly, currency: forecast.currency, style: currencyDisplayStyle))"
+                                        )
+                                        Text(
+                                            "年化 \(Money.display(forecast.annual, currency: forecast.currency, style: currencyDisplayStyle))"
+                                        )
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    .monospacedDigit()
+                                }
+                                .frame(height: DashboardLayout.currencyForecastRowHeight)
+                                if forecast.id != currencyForecasts.last?.id { Divider() }
                             }
-                            .monospacedDigit()
                         }
-                        .padding(.vertical, 8)
-                        if forecast.id != currencyForecasts.last?.id { Divider() }
                     }
+                    .defaultScrollAnchor(.top)
+                    .dashboardScrollIndicatorGutter()
                 }
             }
+            .frame(height: DashboardLayout.primaryCardContentHeight)
         }
     }
 
     private var upcomingCard: some View {
-        DashboardCard(title: "即将到期", symbol: "clock") {
-            VStack(alignment: .leading, spacing: 12) {
-                Picker("临期范围", selection: $session.dueHorizon) {
-                    ForEach(DueHorizon.allCases) { horizon in
-                        Text(horizon.title).tag(horizon)
+        DashboardCard(
+            title: upcomingScope.title,
+            symbol: "clock",
+            headerAccessory: {
+                Picker("订阅范围", selection: $upcomingScope) {
+                    ForEach(DashboardUpcomingScope.allCases) { scope in
+                        Text(scope.title).tag(scope)
                     }
                 }
+                .labelsHidden()
                 .pickerStyle(.segmented)
-                Text("共 \(session.dashboardUpcomingItems.count) 项")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                if session.dashboardUpcomingItems.isEmpty {
-                    Text("暂无到期项目")
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, minHeight: 72, alignment: .center)
-                } else {
-                    ScrollView {
-                        LazyVStack(spacing: 8) {
-                            ForEach(session.dashboardUpcomingItems) { item in
-                                HStack(spacing: 8) {
-                                    Button {
-                                        session.presentDetails(for: item.id)
-                                    } label: {
-                                        ServiceIconView(
-                                            iconResourceName: item.iconResourceName,
-                                            iconURLString: item.iconURLString,
-                                            fallbackSeed: item.name,
-                                            size: 22
-                                        )
-                                    }
-                                    .buttonStyle(.plain)
-                                    .help("查看订阅详情")
-                                    .accessibilityLabel("查看 \(item.name) 的订阅详情")
-                                    Text(item.name)
-                                    Spacer()
-                                    Text(item.expiryDate)
-                                        .foregroundStyle(.secondary)
+                .fixedSize()
+            },
+            content: {
+                VStack(alignment: .leading, spacing: 12) {
+                    if upcomingScope == .upcoming {
+                        HStack(spacing: 12) {
+                            Spacer()
+                            Text("临期范围")
+                                .font(.headline)
+                            Picker("临期范围", selection: $session.dueHorizon) {
+                                ForEach(DueHorizon.allCases) { horizon in
+                                    Text(horizon.title).tag(horizon)
                                 }
-                                .contentShape(Rectangle())
-                                .onTapGesture(count: 2) {
+                            }
+                            .labelsHidden()
+                            .pickerStyle(.segmented)
+                            .fixedSize()
+                        }
+                    }
+                    subscriptionList
+                }
+                .frame(height: DashboardLayout.primaryCardContentHeight, alignment: .top)
+            }
+        )
+    }
+
+    @ViewBuilder
+    private var subscriptionList: some View {
+        Group {
+            if displayedUpcomingItems.isEmpty {
+                Text(upcomingScope.emptyMessage)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 72, alignment: .center)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 8) {
+                        ForEach(displayedUpcomingItems) { item in
+                            HStack(spacing: 8) {
+                                Button {
+                                    session.presentDetails(for: item.id)
+                                } label: {
+                                    ServiceIconView(
+                                        iconResourceName: item.iconResourceName,
+                                        iconURLString: item.iconURLString,
+                                        fallbackSeed: item.name,
+                                        size: 22
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                                .help("查看订阅详情")
+                                .accessibilityLabel("查看 \(item.name) 的订阅详情")
+                                Text(item.name)
+                                Spacer()
+                                Text(item.expiryDate)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .contentShape(Rectangle())
+                            .onTapGesture(count: 2) {
+                                session.presentDetails(for: item.id)
+                            }
+                            .contextMenu {
+                                Button("订阅详情") {
                                     session.presentDetails(for: item.id)
                                 }
-                                .contextMenu {
-                                    Button("订阅详情") {
-                                        session.presentDetails(for: item.id)
-                                    }
-                                    Button("编辑订阅") {
-                                        session.presentEditor(for: item.id)
-                                    }
+                                Button("编辑订阅") {
+                                    session.presentEditor(for: item.id)
                                 }
                             }
                         }
                     }
-                    .frame(maxHeight: 150)
                 }
+                .dashboardScrollIndicatorGutter()
             }
+        }
+        .frame(maxHeight: .infinity)
+        .safeAreaInset(edge: .bottom, alignment: .trailing, spacing: 4) {
+            Text("共 \(displayedUpcomingItems.count) 项")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
     private var categoryCard: some View {
         DashboardCard(title: "服务类型年化", symbol: "chart.bar.xaxis") {
-            if categoryForecasts.isEmpty {
+            if categoryForecastGroups.isEmpty {
                 Text("暂无费用数据")
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 90, alignment: .center)
             } else {
                 IndependentColumnLayout(minimumColumnWidth: 220, spacing: 12) {
-                    ForEach(categoryForecasts) { forecast in
+                    ForEach(categoryForecastGroups) { group in
                         DisclosureGroup(
                             isExpanded: Binding(
-                                get: { expandedCategoryForecasts.contains(forecast.id) },
+                                get: { expandedCategories.contains(group.category) },
                                 set: { isExpanded in
                                     if isExpanded {
-                                        expandedCategoryForecasts.insert(forecast.id)
+                                        expandedCategories.insert(group.category)
                                     } else {
-                                        expandedCategoryForecasts.remove(forecast.id)
+                                        expandedCategories.remove(group.category)
                                     }
                                 }
                             )
                         ) {
                             VStack(spacing: 6) {
-                                ForEach(categoryItems(for: forecast)) { item in
+                                ForEach(categoryItems(for: group.category)) { item in
                                     HStack(spacing: 8) {
                                         Button {
                                             session.presentDetails(for: item.id)
@@ -218,19 +282,14 @@ struct DashboardView: View {
                             .padding(.top, 8)
                         } label: {
                             HStack {
-                                Text(forecast.category.title)
+                                Text(group.category.title)
                                 Spacer()
-                                Text(
-                                    Money.display(
-                                        forecast.annual,
-                                        currency: forecast.currency,
-                                        style: currencyDisplayStyle
-                                    )
-                                )
+                                Text(categoryAmount(for: group))
                                     .monospacedDigit()
                             }
                         }
                         .padding(10)
+                        .help(categoryHelp(for: group))
                     }
                 }
             }
@@ -241,13 +300,120 @@ struct DashboardView: View {
         analytics.currencyForecasts
     }
 
-    private var categoryForecasts: [CategoryForecast] {
-        analytics.categoryForecasts
+    private var displayedUpcomingItems: [SubscriptionListItem] {
+        switch upcomingScope {
+        case .active: session.dashboardActiveSubscriptionItems
+        case .upcoming: session.dashboardUpcomingItems
+        }
     }
 
-    private func categoryItems(for forecast: CategoryForecast) -> [SubscriptionListItem] {
-        analytics.forecastItems.filter {
-            $0.categoryValue == forecast.category && $0.money.currency == forecast.currency
+    private var monthlyForecastText: String {
+        guard let total = feature.exchangeRateQuote?.monthlyTotal(forecasts: currencyForecasts) else {
+            return "—"
+        }
+        return String(
+            format: AppLocalization.string("约 %@"),
+            Money.display(total, currency: baseCurrency, style: currencyDisplayStyle)
+        )
+    }
+
+    private var monthlyForecastHelp: String {
+        feature.exchangeRateQuote?.disclosure
+            ?? feature.exchangeRateError?.message
+            ?? AppLocalization.string("暂无费用数据")
+    }
+
+    private var categoryForecastGroups: [CategoryForecastGroup] {
+        analytics.categoryForecastGroups
+    }
+
+    private var categoryExchangeRateRequestID: String {
+        let currencies = Set(analytics.categoryForecasts.map(\.currency))
+            .map(\.rawValue)
+            .sorted()
+            .joined(separator: ",")
+        return "\(session.exchangeRateRefreshRevision):\(baseCurrency.rawValue):\(currencies)"
+    }
+
+    private func categoryItems(for category: ServiceCategory) -> [SubscriptionListItem] {
+        analytics.forecastItems.filter { $0.categoryValue == category }
+    }
+
+    private func categoryAmount(for group: CategoryForecastGroup) -> String {
+        if group.forecasts.count == 1, let forecast = group.forecasts.first {
+            return Money.display(
+                forecast.annual,
+                currency: forecast.currency,
+                style: currencyDisplayStyle
+            )
+        }
+        guard let total = feature.exchangeRateQuote?.annualTotal(forecasts: group.forecasts) else {
+            return AppLocalization.string("约值暂不可用")
+        }
+        return String(
+            format: AppLocalization.string("约 %@"),
+            Money.display(total, currency: baseCurrency, style: currencyDisplayStyle)
+        )
+    }
+
+    private func categoryHelp(for group: CategoryForecastGroup) -> String {
+        guard group.forecasts.count > 1 else { return "展开查看原币种金额" }
+        if let quote = feature.exchangeRateQuote {
+            return "\(quote.disclosure) 展开后仍显示各订阅原币种金额。"
+        }
+        return feature.exchangeRateError?.message ?? "汇率暂不可用；展开后仍可查看原币种金额。"
+    }
+
+    @MainActor
+    private func loadCategoryExchangeRates() async {
+        await feature.loadExchangeRates(
+            using: services.exchangeRates,
+            forecasts: analytics.categoryForecasts,
+            baseCurrency: baseCurrency,
+            referenceDate: session.referenceDate
+        )
+    }
+}
+
+private enum DashboardLayout {
+    static let maximumVisibleCurrencyForecasts = 4
+    static let currencyForecastRowHeight: CGFloat = 60
+    static let dividerHeight: CGFloat = 1
+    static let scrollIndicatorGutter: CGFloat = 14
+
+    static let primaryCardContentHeight =
+        CGFloat(maximumVisibleCurrencyForecasts) * currencyForecastRowHeight
+        + CGFloat(maximumVisibleCurrencyForecasts - 1) * dividerHeight
+}
+
+private extension View {
+    func dashboardScrollIndicatorGutter() -> some View {
+        contentMargins(
+            .trailing,
+            DashboardLayout.scrollIndicatorGutter,
+            for: .scrollContent
+        )
+        .padding(.trailing, -DashboardLayout.scrollIndicatorGutter)
+    }
+}
+
+private enum DashboardUpcomingScope: String, CaseIterable, Identifiable {
+    case active
+    case upcoming
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .active: AppLocalization.string("正在订阅")
+        case .upcoming: AppLocalization.string("即将到期")
+        }
+    }
+
+    var emptyMessage: String {
+        switch self {
+        case .active: AppLocalization.string("暂无正在订阅项目")
+        case .upcoming: AppLocalization.string("暂无到期项目")
         }
     }
 }
@@ -256,5 +422,6 @@ struct DashboardView: View {
     NavigationStack {
         DashboardView(session: WindowSession())
     }
+    .environment(AppServices(inMemory: true))
     .frame(width: 1000, height: 760)
 }

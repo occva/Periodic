@@ -1,18 +1,47 @@
 import SwiftUI
 
-struct DashboardCard<Content: View>: View {
+struct DashboardCard<Content: View, HeaderAccessory: View>: View {
     let title: String
     let symbol: String
-    @ViewBuilder let content: Content
+    private let headerAccessory: HeaderAccessory
+    private let content: Content
+
+    init(
+        title: String,
+        symbol: String,
+        @ViewBuilder content: () -> Content
+    ) where HeaderAccessory == EmptyView {
+        self.title = title
+        self.symbol = symbol
+        self.headerAccessory = EmptyView()
+        self.content = content()
+    }
+
+    init(
+        title: String,
+        symbol: String,
+        @ViewBuilder headerAccessory: () -> HeaderAccessory,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.title = title
+        self.symbol = symbol
+        self.headerAccessory = headerAccessory()
+        self.content = content()
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Label {
-                Text(AppLocalization.string(title))
-            } icon: {
-                Image(systemName: symbol)
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Label {
+                    Text(AppLocalization.string(title))
+                } icon: {
+                    Image(systemName: symbol)
+                }
+                .font(.headline)
+                Spacer(minLength: 12)
+                headerAccessory
             }
-            .font(.headline)
+            .frame(minHeight: 32)
             content
         }
         .frame(maxWidth: .infinity, minHeight: 190, maxHeight: .infinity, alignment: .topLeading)

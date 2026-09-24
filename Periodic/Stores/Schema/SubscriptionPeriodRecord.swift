@@ -12,6 +12,9 @@ final class SubscriptionPeriodRecord {
     var amountMinor: Int64
     var currencyCode: String
     var currencyScale: Int
+    // SwiftData applies this default to rows created before source tracking existed.
+    // Their exact origin cannot be reconstructed without risking false history.
+    var sourceRaw: String = SubscriptionPeriodSource.legacy.rawValue
     var createdAt: Date
 
     init(input: SubscriptionPeriodCreateInput, now: Date = Date()) {
@@ -24,6 +27,7 @@ final class SubscriptionPeriodRecord {
         amountMinor = input.money.minorUnits
         currencyCode = input.money.currency.rawValue
         currencyScale = input.money.currency.scale
+        sourceRaw = input.source.rawValue
         createdAt = now
     }
 

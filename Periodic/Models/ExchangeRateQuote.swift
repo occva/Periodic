@@ -28,6 +28,17 @@ struct ExchangeRateQuote: Codable, Equatable, Sendable {
         return total
     }
 
+    func annualTotal(forecasts: [CategoryForecast]) -> Decimal? {
+        var total = Decimal.zero
+        for forecast in forecasts {
+            guard let converted = converting(forecast.annual, from: forecast.currency) else {
+                return nil
+            }
+            total += converted
+        }
+        return total
+    }
+
     var disclosure: String {
         guard source == .frankfurter else {
             return AppLocalization.string("所有金额均为默认货币，无需汇率换算。")

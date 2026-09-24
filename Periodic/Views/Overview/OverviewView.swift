@@ -72,7 +72,7 @@ struct OverviewView: View {
                     .help("查看订阅详情")
                     .accessibilityLabel("查看 \(item.name) 的订阅详情")
                 }
-                .width(min: 160, ideal: 220)
+                .width(min: 140, ideal: 210, max: 210)
 
                 TableColumnForEach(OverviewTextColumn.allCases) { column in
                     TableColumn(column.title) { item in
@@ -84,7 +84,11 @@ struct OverviewView: View {
                             .lineLimit(1)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .width(min: column.minimumWidth, ideal: column.idealWidth)
+                    .width(
+                        min: column.minimumWidth,
+                        ideal: column.idealWidth,
+                        max: column.maximumWidth
+                    )
                 }
             } rows: {
                 switch session.grouping {

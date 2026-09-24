@@ -21,7 +21,7 @@ struct SummaryMetricCard: View {
                 Text(detail).font(.caption).foregroundStyle(.secondary)
             }
         }
-        .frame(maxWidth: .infinity, minHeight: 92, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 92, alignment: .topLeading)
         .padding(14)
         .glassEffect(.regular, in: .rect(cornerRadius: 14))
     }

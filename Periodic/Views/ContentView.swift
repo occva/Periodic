@@ -113,6 +113,14 @@ struct ContentView: View {
                         try await store.updatePeriod(input)
                         services.notifySubscriptionDataChanged()
                         await session.reload(using: services)
+                    },
+                    confirmAutomaticRenewal: { request in
+                        guard let store = services.subscriptionStore else {
+                            throw ContentViewError.storeUnavailable
+                        }
+                        _ = try await store.confirmAutomaticRenewal(request)
+                        services.notifySubscriptionDataChanged()
+                        await session.reload(using: services)
                     }
                 )
             }
@@ -165,17 +173,25 @@ struct ContentView: View {
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
-                session.refreshReferenceDate()
+                Task { @MainActor in
+                    await session.reload(using: services)
+                }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged)) { _ in
-            session.refreshReferenceDate()
+            Task { @MainActor in
+                await session.reload(using: services)
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .NSSystemClockDidChange)) { _ in
-            session.refreshReferenceDate()
+            Task { @MainActor in
+                await session.reload(using: services)
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .NSSystemTimeZoneDidChange)) { _ in
-            session.refreshReferenceDate()
+            Task { @MainActor in
+                await session.reload(using: services)
+            }
         }
         .errorAlert(
             Binding(
@@ -203,6 +219,9 @@ struct ContentView: View {
             if let dueHorizon {
                 session.dueHorizon = dueHorizon
             }
+            pendingWindowRoute = nil
+        case .overview:
+            destinationID = AppDestination.overview.rawValue
             pendingWindowRoute = nil
         case .subscriptionDetails(let id):
             destinationID = AppDestination.overview.rawValue

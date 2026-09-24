@@ -10,11 +10,14 @@ struct SubscriptionDetailView: View {
     let loadPeriods: @MainActor (UUID) async throws -> [SubscriptionPeriodDTO]
     let addPeriod: @MainActor (SubscriptionPeriodAddInput) async throws -> Void
     let updatePeriod: @MainActor (SubscriptionPeriodUpdateInput) async throws -> Void
+    let confirmAutomaticRenewal: @MainActor (SubscriptionRenewalRequest) async throws -> Void
 
     @State private var periods: [SubscriptionPeriodDTO] = []
     @State private var isLoading = false
     @State private var periodDraft: SubscriptionPeriodDraft?
     @State private var isSavingPeriod = false
+    @State private var isConfirmingRenewal = false
+    @State private var isPresentingRenewalConfirmation = false
     @State private var error: PresentedError?
 
     private var item: SubscriptionListItem { SubscriptionListItem(dto: subscription) }
@@ -72,6 +75,20 @@ struct SubscriptionDetailView: View {
         .presentationSizing(.fitted)
         .task(id: subscription.id) { await reload() }
         .errorAlert($error)
+        .confirmationDialog(
+            "确认服务商已完成续费？",
+            isPresented: $isPresentingRenewalConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("确认已续费") { confirmRenewal() }
+            Button("取消", role: .cancel) {}
+        } message: {
+            if let renewalPreview {
+                Text(
+                    "当前到期日为 \(renewalPreview.previousExpiry.displayText)。确认后将更新为 \(renewalPreview.nextStart.displayText) 至 \(renewalPreview.nextExpiry.displayText)，并按当前报价添加一条续费周期记录。"
+                )
+            }
+        }
         .accessibilityIdentifier("subscription-detail")
     }
 
@@ -95,6 +112,19 @@ struct SubscriptionDetailView: View {
                 .foregroundStyle(.secondary)
             }
             Spacer()
+            if subscription.automaticallyRenews {
+                if renewalPreview != nil {
+                    Button("确认已续费", systemImage: "arrow.trianglehead.2.clockwise.rotate.90") {
+                        isPresentingRenewalConfirmation = true
+                    }
+                    .disabled(isConfirmingRenewal)
+                    .buttonStyle(.glassProminent)
+                    .accessibilityHint("更新当前周期并添加一条续费周期记录")
+                } else {
+                    Label("服务商自动续费", systemImage: "arrow.trianglehead.2.clockwise.rotate.90")
+                        .foregroundStyle(.secondary)
+                }
+            }
             Button("编辑订阅", systemImage: "pencil") {
                 onEditSubscription()
             }
@@ -330,6 +360,33 @@ struct SubscriptionDetailView: View {
             } catch {
                 self.error = PresentedError(error, title: "无法保存周期记录")
                 isSavingPeriod = false
+            }
+        }
+    }
+
+    private var renewalPreview: SubscriptionRenewalPreview? {
+        try? SubscriptionRenewalRule.preview(
+            subscription: subscription,
+            referenceDate: .today
+        )
+    }
+
+    private func confirmRenewal() {
+        guard let renewalPreview else { return }
+        isConfirmingRenewal = true
+        let request = SubscriptionRenewalRequest(
+            subscriptionID: subscription.id,
+            expectedRevision: renewalPreview.expectedRevision,
+            expectedExpiry: renewalPreview.previousExpiry
+        )
+        Task { @MainActor in
+            do {
+                try await confirmAutomaticRenewal(request)
+                isConfirmingRenewal = false
+                await reload()
+            } catch {
+                self.error = PresentedError(error, title: "无法确认续费")
+                isConfirmingRenewal = false
             }
         }
     }

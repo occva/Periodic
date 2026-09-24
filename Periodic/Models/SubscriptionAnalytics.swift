@@ -31,6 +31,13 @@ struct CategoryForecast: Identifiable, Equatable, Sendable {
     let itemCount: Int
 }
 
+struct CategoryForecastGroup: Identifiable, Equatable, Sendable {
+    var id: ServiceCategory { category }
+
+    let category: ServiceCategory
+    let forecasts: [CategoryForecast]
+}
+
 /// A deterministic view of subscription state at one local calendar date.
 /// Keeping the reference date explicit makes midnight and historical/future
 /// scenarios testable without changing the system clock.
@@ -114,6 +121,16 @@ struct SubscriptionAnalytics: Sendable {
             }
             return $0.currency.rawValue < $1.currency.rawValue
         }
+    }
+
+    var categoryForecastGroups: [CategoryForecastGroup] {
+        Dictionary(grouping: categoryForecasts, by: \.category)
+            .map { category, forecasts in
+                CategoryForecastGroup(category: category, forecasts: forecasts)
+            }
+            .sorted {
+                $0.category.title.localizedStandardCompare($1.category.title) == .orderedAscending
+            }
     }
 
     private func expiryAscending(_ lhs: SubscriptionListItem, _ rhs: SubscriptionListItem) -> Bool {

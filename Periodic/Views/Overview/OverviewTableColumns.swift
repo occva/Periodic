@@ -53,6 +53,8 @@ enum OverviewTextColumn: String, CaseIterable, Identifiable {
         switch self {
         case .remainingDays:
             RemainingDurationCell(item: item, referenceDate: referenceDate)
+        case .expiryStatus:
+            Text(item.expiryStatus(relativeTo: referenceDate))
         case .amount:
             Text(item.amount(style: currencyDisplayStyle))
                 .monospacedDigit()
@@ -69,22 +71,37 @@ enum OverviewTextColumn: String, CaseIterable, Identifiable {
 
     var minimumWidth: CGFloat {
         switch self {
-        case .amount: 130
-        case .note: 140
-        case .expiryDate, .monthlyEstimate, .annualEstimate: 100
-        case .remainingDays: 140
-        default: 84
+        case .managementStatus, .billingKind: 68
+        case .category, .expiryStatus: 85
+        case .expiryDate: 100
+        case .remainingDays: 108
+        case .amount: 108
+        case .monthlyEstimate, .annualEstimate: 102
+        case .note: 116
         }
     }
 
     var idealWidth: CGFloat {
         switch self {
-        case .amount: 150
-        case .note: 220
-        case .expiryDate: 112
-        case .remainingDays: 150
-        case .monthlyEstimate, .annualEstimate: 116
-        default: 96
+        case .managementStatus, .billingKind: 80
+        case .category, .expiryStatus: 88
+        case .expiryDate: 96
+        case .remainingDays: 120
+        case .amount: 120
+        case .monthlyEstimate, .annualEstimate: 112
+        case .note: 150
+        }
+    }
+
+    var maximumWidth: CGFloat {
+        switch self {
+        case .managementStatus, .billingKind: 86
+        case .category, .expiryStatus: 100
+        case .expiryDate: 106
+        case .remainingDays: 132
+        case .amount: 140
+        case .monthlyEstimate, .annualEstimate: 126
+        case .note: 180
         }
     }
 }
@@ -94,7 +111,7 @@ private struct RemainingDurationCell: View {
     let referenceDate: LocalDate
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             Text(item.remainingDayCount(relativeTo: referenceDate).map(String.init) ?? "—")
                 .frame(minWidth: 28, alignment: .trailing)
                 .monospacedDigit()
@@ -102,7 +119,7 @@ private struct RemainingDurationCell: View {
                 ProgressView(value: progress)
                     .progressViewStyle(.linear)
                     .tint(progress > 0 ? .green : .secondary)
-                    .frame(width: 100)
+                    .frame(width: 72)
                     .help("按 100 天刻度显示剩余时间")
             }
         }
