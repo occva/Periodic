@@ -22,6 +22,8 @@ final class WindowSession {
     private(set) var isPresentingSubscriptionEditor = false
     private(set) var isPresentingSubscriptionDetail = false
     private(set) var isPresentingTemplateLibrary = false
+    private(set) var isPresentingReminderCenter = false
+    private(set) var reminderCenterScope = SubscriptionReminderScope.all
     private(set) var editingSubscriptionID: UUID?
     private(set) var subscriptionEditorPreset: SubscriptionTemplatePreset?
     private(set) var detailSubscriptionID: UUID?
@@ -98,17 +100,15 @@ final class WindowSession {
     }
 
     var automaticRenewalDueItems: [SubscriptionListItem] {
-        items.filter { item in
-            guard item.managementState == .active,
-                  item.billingKindValue == .recurring,
-                  item.automaticallyRenews,
-                  let expiry = item.expiry,
-                  let cycleMonths = item.cycleMonths else {
-                return false
-            }
-            return cycleMonths > 0 && expiry <= referenceDate
-        }
-        .sorted(by: expiryAscending)
+        analytics.automaticRenewalDueItems
+    }
+
+    var reminderItems: [SubscriptionListItem] {
+        analytics.reminderItems(within: dueHorizon.rawValue)
+    }
+
+    var reminderCenterItemCount: Int {
+        reminderItems.count
     }
 
     var editingSubscription: SubscriptionDTO? {
@@ -134,6 +134,25 @@ final class WindowSession {
 
     func dismissTemplateLibrary() {
         isPresentingTemplateLibrary = false
+    }
+
+    func presentReminderCenter(scope: SubscriptionReminderScope = .all) {
+        reminderCenterScope = scope
+        isPresentingReminderCenter = true
+    }
+
+    func dismissReminderCenter() {
+        isPresentingReminderCenter = false
+    }
+
+    func renewalPreview(for id: UUID) -> SubscriptionRenewalPreview? {
+        guard let subscription = subscriptions.first(where: { $0.id == id }) else {
+            return nil
+        }
+        return try? SubscriptionRenewalRule.preview(
+            subscription: subscription,
+            referenceDate: referenceDate
+        )
     }
 
     func presentEditor(for id: UUID) {
@@ -194,7 +213,7 @@ final class WindowSession {
         do {
             subscriptions = try await store.fetchAll()
             items = subscriptions.map(SubscriptionListItem.init(dto:))
-            await services.reconcileRenewalNotifications(
+            await services.reconcileSubscriptionNotifications(
                 subscriptions: subscriptions,
                 referenceDate: referenceDate
             )

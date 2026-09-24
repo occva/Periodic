@@ -14,6 +14,7 @@ struct SubscriptionListItem: Identifiable, Hashable, Sendable {
     let cycleMonths: Int?
     let money: Money
     let note: String
+    let reminderEnabled: Bool
     let automaticallyRenews: Bool
 
     init(dto: SubscriptionDTO) {
@@ -30,6 +31,7 @@ struct SubscriptionListItem: Identifiable, Hashable, Sendable {
         cycleMonths = dto.cycleMonths
         money = dto.money
         note = dto.note
+        reminderEnabled = dto.reminderEnabled
         automaticallyRenews = dto.automaticallyRenews
     }
 
@@ -64,6 +66,17 @@ struct SubscriptionListItem: Identifiable, Hashable, Sendable {
         return expiry.dayNumber - referenceDate.dayNumber
     }
 
+    func isPendingAutomaticRenewal(relativeTo referenceDate: LocalDate) -> Bool {
+        guard managementState == .active,
+              billingKindValue == .recurring,
+              automaticallyRenews,
+              let expiry,
+              let cycleMonths else {
+            return false
+        }
+        return cycleMonths > 0 && expiry <= referenceDate
+    }
+
     var remainingDays: String { remainingDayCount.map(String.init) ?? "—" }
 
     func remainingDaysProgress(
@@ -89,8 +102,6 @@ struct SubscriptionListItem: Identifiable, Hashable, Sendable {
         return switch days {
         case ..<0: AppLocalization.string("已过期")
         case 0: AppLocalization.string("今天到期")
-        case 1...7: AppLocalization.string("7 天内")
-        case 8...30: AppLocalization.string("30 天内")
         default:
             String(
                 format: AppLocalization.string("%d 天内"),

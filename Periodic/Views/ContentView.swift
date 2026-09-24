@@ -131,6 +131,14 @@ struct ContentView: View {
                         _ = try await store.confirmAutomaticRenewal(request)
                         services.notifySubscriptionDataChanged()
                         await session.reload(using: services)
+                    },
+                    markAutomaticRenewalNotRenewed: { request in
+                        guard let store = services.subscriptionStore else {
+                            throw ContentViewError.storeUnavailable
+                        }
+                        try await store.markAutomaticRenewalNotRenewed(request)
+                        services.notifySubscriptionDataChanged()
+                        await session.reload(using: services)
                     }
                 )
             }
@@ -162,6 +170,43 @@ struct ContentView: View {
                 await session.reload(using: services)
             }
         }
+        .sheet(
+            isPresented: Binding(
+                get: { session.isPresentingReminderCenter },
+                set: { if !$0 { session.dismissReminderCenter() } }
+            ),
+            onDismiss: { session.dismissReminderCenter() }
+        ) {
+            SubscriptionReminderCenterView(
+                initialScope: session.reminderCenterScope,
+                reminderItems: session.reminderItems,
+                referenceDate: session.referenceDate,
+                previewRenewal: session.renewalPreview(for:),
+                confirmRenewal: { request in
+                    guard let store = services.subscriptionStore else {
+                        throw ContentViewError.storeUnavailable
+                    }
+                    _ = try await store.confirmAutomaticRenewal(request)
+                    services.notifySubscriptionDataChanged()
+                    await session.reload(using: services)
+                },
+                markNotRenewed: { request in
+                    guard let store = services.subscriptionStore else {
+                        throw ContentViewError.storeUnavailable
+                    }
+                    try await store.markAutomaticRenewalNotRenewed(request)
+                    services.notifySubscriptionDataChanged()
+                    await session.reload(using: services)
+                },
+                onDetails: { id in
+                    session.dismissReminderCenter()
+                    Task { @MainActor in
+                        await Task.yield()
+                        session.presentDetails(for: id)
+                    }
+                }
+            )
+        }
         .task {
             do {
                 try await services.prepareStoredSubscriptionData()
@@ -171,6 +216,7 @@ struct ContentView: View {
             }
             await session.reload(using: services)
             applyPendingWindowRoute()
+            receiveNotificationSelection()
         }
         .onChange(of: services.subscriptionDataVersion) { _, _ in
             Task { @MainActor in
@@ -180,6 +226,9 @@ struct ContentView: View {
         }
         .onChange(of: windowRouter.routeRevision) { _, _ in
             receiveWindowRoute()
+        }
+        .onChange(of: services.subscriptionNotifications.selection.subscriptionID) { _, _ in
+            receiveNotificationSelection()
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
@@ -218,6 +267,12 @@ struct ContentView: View {
     private func receiveWindowRoute() {
         guard let route = windowRouter.consumeRoute(for: windowID) else { return }
         pendingWindowRoute = route
+        applyPendingWindowRoute()
+    }
+
+    private func receiveNotificationSelection() {
+        guard let id = services.subscriptionNotifications.selection.consume() else { return }
+        pendingWindowRoute = .subscriptionDetails(id)
         applyPendingWindowRoute()
     }
 

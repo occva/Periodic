@@ -117,39 +117,54 @@ actor DataExchangeService {
     ) async throws -> DataImportReceipt {
         guard plan.expiresAt > Date() else { throw DataExchangeError.planExpired }
         var writes: [AppleIconCache.ImportedImageWrite] = []
+        var assetReferences: [String: String] = [:]
         do {
-            var assetReferences: [String: String] = [:]
             for (identifier, data) in plan.package.assets {
                 let write = try await iconCache.persistImportedImage(data)
                 writes.append(write)
                 assetReferences[identifier] = write.reference
             }
-            var snapshot = plan.package.snapshot
-            snapshot.subscriptions = snapshot.subscriptions.map { value in
-                var copy = value
-                copy.iconAssetID = value.iconAssetID.flatMap { assetReferences[$0] }
-                return copy
-            }
-            snapshot.templates = snapshot.templates.map { value in
-                var copy = value
-                copy.iconAssetID = value.iconAssetID.flatMap { assetReferences[$0] }
-                return copy
-            }
-            let receipt = try await store.execute(
-                imported: snapshot,
-                expectedDigest: plan.targetDigest,
-                conflictResolution: conflictResolution
-            )
-            let referencedImages = try await store.referencedIconReferences()
-            await iconCache.discardImportedImages(writes, keeping: referencedImages)
-            if importsSettings, let settings = snapshot.settings {
-                apply(settings)
-            }
-            return receipt
         } catch {
             await iconCache.discardImportedImages(writes)
             throw error
         }
+
+        var snapshot = plan.package.snapshot
+        snapshot.subscriptions = snapshot.subscriptions.map { value in
+            var copy = value
+            copy.iconAssetID = value.iconAssetID.flatMap { assetReferences[$0] }
+            return copy
+        }
+        snapshot.templates = snapshot.templates.map { value in
+            var copy = value
+            copy.iconAssetID = value.iconAssetID.flatMap { assetReferences[$0] }
+            return copy
+        }
+
+        let receipt: DataImportReceipt
+        do {
+            receipt = try await store.execute(
+                imported: snapshot,
+                expectedDigest: plan.targetDigest,
+                conflictResolution: conflictResolution
+            )
+        } catch {
+            await iconCache.discardImportedImages(writes)
+            throw error
+        }
+
+        do {
+            let referencedImages = try await store.referencedIconReferences()
+            await iconCache.discardImportedImages(writes, keeping: referencedImages)
+        } catch {
+            // The database transaction has committed. Retain the files rather
+            // than deleting assets that may now be referenced by imported rows.
+            AppLog.persistence.error("Failed to remove unreferenced imported icons")
+        }
+        if importsSettings, let settings = snapshot.settings {
+            apply(settings)
+        }
+        return receipt
     }
 
     private func settingsSnapshot() -> DataPackageSettings {

@@ -13,7 +13,7 @@ final class AppServices {
     let appleIconSearch: AppleIconSearchClient
     let appleIconCache: AppleIconCache
     let exchangeRates: FrankfurterExchangeRateClient
-    let renewalNotifications: RenewalNotificationService
+    let subscriptionNotifications: SubscriptionNotificationService
     let dataExchange: DataExchangeService?
     let builtinTemplateCategoryStore: BuiltinTemplateCategoryStore?
     let builtinTemplates: BuiltinTemplateCatalog?
@@ -28,19 +28,20 @@ final class AppServices {
         persistence: PersistenceController = PersistenceController(),
         inMemory: Bool? = nil
     ) {
+        let useMemoryStore = inMemory ?? ProcessInfo.processInfo.arguments.contains("-store-in-memory")
         self.persistence = persistence
         appleIconSearch = AppleIconSearchClient()
         appleIconCache = AppleIconCache()
         exchangeRates = FrankfurterExchangeRateClient()
-        renewalNotifications = RenewalNotificationService()
+        subscriptionNotifications = SubscriptionNotificationService(
+            isSystemIntegrationEnabled: !useMemoryStore
+        )
         do {
             builtinTemplates = try BuiltinTemplateCatalog.load()
         } catch {
             builtinTemplates = nil
             builtinTemplateError = PresentedError(error, title: "无法读取内置模板")
         }
-        let useMemoryStore = inMemory ?? ProcessInfo.processInfo.arguments.contains("-store-in-memory")
-
         do {
             let schema = Schema([
                 SubscriptionRecord.self,
@@ -108,11 +109,11 @@ final class AppServices {
         templateDataVersion &+= 1
     }
 
-    func reconcileRenewalNotifications(
+    func reconcileSubscriptionNotifications(
         subscriptions: [SubscriptionDTO],
         referenceDate: LocalDate = .today
     ) async {
-        await renewalNotifications.reconcile(
+        await subscriptionNotifications.reconcile(
             subscriptions: subscriptions,
             referenceDate: referenceDate
         )

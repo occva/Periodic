@@ -12,6 +12,9 @@ struct SubscriptionDetailView: View {
     let updatePeriod: @MainActor (SubscriptionPeriodUpdateInput) async throws -> Void
     let deletePeriod: @MainActor (SubscriptionPeriodDeleteInput) async throws -> Void
     let confirmAutomaticRenewal: @MainActor (SubscriptionRenewalRequest) async throws -> Void
+    let markAutomaticRenewalNotRenewed: @MainActor (
+        SubscriptionNonRenewalRequest
+    ) async throws -> Void
 
     @State private var periods: [SubscriptionPeriodDTO] = []
     @State private var isLoading = false
@@ -20,7 +23,9 @@ struct SubscriptionDetailView: View {
     @State private var periodPendingDeletion: SubscriptionPeriodDTO?
     @State private var isDeletingPeriod = false
     @State private var isConfirmingRenewal = false
-    @State private var isPresentingRenewalConfirmation = false
+    @State private var isPresentingRenewalOptions = false
+    @State private var isPresentingNonRenewalConfirmation = false
+    @State private var renewalEditorPreview: SubscriptionRenewalPreview?
     @State private var error: PresentedError?
 
     private var item: SubscriptionListItem { SubscriptionListItem(dto: subscription) }
@@ -81,18 +86,38 @@ struct SubscriptionDetailView: View {
         .task(id: subscription.id) { await reload() }
         .errorAlert($error)
         .confirmationDialog(
-            "确认服务商已完成续费？",
-            isPresented: $isPresentingRenewalConfirmation,
+            "选择续费方式",
+            isPresented: $isPresentingRenewalOptions,
             titleVisibility: .visible
         ) {
-            Button("确认已续费") { confirmRenewal() }
+            Button("按当前周期续费") { confirmRenewalWithCurrentTerms() }
+            Button("自定义续费…") { renewalEditorPreview = renewalPreview }
             Button("取消", role: .cancel) {}
         } message: {
             if let renewalPreview {
-                Text(
-                    "当前到期日为 \(renewalPreview.previousExpiry.displayText)。确认后将更新为 \(renewalPreview.nextStart.displayText) 至 \(renewalPreview.nextExpiry.displayText)，并按当前报价添加一条续费周期记录。"
-                )
+                Text(String(
+                    format: AppLocalization.string("当前方案为 %@，%@。"),
+                    renewalCycleTitle,
+                    renewalPreview.money.displayText(style: currencyDisplayStyle)
+                ))
             }
+        }
+        .confirmationDialog(
+            "确认本期未续费？",
+            isPresented: $isPresentingNonRenewalConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("标记未续费", role: .destructive) { markAsNotRenewed() }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("将关闭服务商自动续费并保留当前到期状态，不会新增周期记录。")
+        }
+        .sheet(item: $renewalEditorPreview) { preview in
+            SubscriptionRenewalEditorView(
+                preview: preview,
+                confirmRenewal: confirmAutomaticRenewal,
+                onConfirmed: { await reload() }
+            )
         }
         .confirmationDialog(
             "删除这条周期记录？",
@@ -135,8 +160,14 @@ struct SubscriptionDetailView: View {
             Spacer()
             if subscription.automaticallyRenews {
                 if renewalPreview != nil {
-                    Button("确认已续费", systemImage: "arrow.trianglehead.2.clockwise.rotate.90") {
-                        isPresentingRenewalConfirmation = true
+                    Button("未续费", systemImage: "xmark") {
+                        isPresentingNonRenewalConfirmation = true
+                    }
+                    .disabled(isConfirmingRenewal)
+                    .buttonStyle(.glass)
+
+                    Button("已续费", systemImage: "arrow.trianglehead.2.clockwise.rotate.90") {
+                        isPresentingRenewalOptions = true
                     }
                     .disabled(isConfirmingRenewal)
                     .buttonStyle(.glassProminent)
@@ -420,13 +451,21 @@ struct SubscriptionDetailView: View {
         )
     }
 
-    private func confirmRenewal() {
+    private var renewalCycleTitle: String {
+        guard let renewalPreview else { return AppLocalization.string("自定义") }
+        return BillingCycle(rawValue: renewalPreview.cycleMonths)?.title
+            ?? AppLocalization.string("自定义")
+    }
+
+    private func confirmRenewalWithCurrentTerms() {
         guard let renewalPreview else { return }
         isConfirmingRenewal = true
         let request = SubscriptionRenewalRequest(
             subscriptionID: subscription.id,
             expectedRevision: renewalPreview.expectedRevision,
-            expectedExpiry: renewalPreview.previousExpiry
+            expectedExpiry: renewalPreview.previousExpiry,
+            cycleMonths: renewalPreview.cycleMonths,
+            money: renewalPreview.money
         )
         Task { @MainActor in
             do {
@@ -435,6 +474,26 @@ struct SubscriptionDetailView: View {
                 await reload()
             } catch {
                 self.error = PresentedError(error, title: "无法确认续费")
+                isConfirmingRenewal = false
+            }
+        }
+    }
+
+    private func markAsNotRenewed() {
+        guard let renewalPreview else { return }
+        isConfirmingRenewal = true
+        let request = SubscriptionNonRenewalRequest(
+            subscriptionID: subscription.id,
+            expectedRevision: renewalPreview.expectedRevision,
+            expectedExpiry: renewalPreview.previousExpiry
+        )
+        Task { @MainActor in
+            do {
+                try await markAutomaticRenewalNotRenewed(request)
+                isConfirmingRenewal = false
+                await reload()
+            } catch {
+                self.error = PresentedError(error, title: "无法标记未续费")
                 isConfirmingRenewal = false
             }
         }

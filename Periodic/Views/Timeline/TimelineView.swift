@@ -168,6 +168,10 @@ struct TimelineView: View {
 
         ToolbarItem(placement: .secondaryAction) {
             Menu {
+                Button("订阅提醒 \(session.reminderCenterItemCount)") {
+                    session.presentReminderCenter(scope: .all)
+                }
+                Divider()
                 Button("无日期 \(session.undatedCount)") {
                     specialCollection = .undated
                 }
@@ -177,7 +181,10 @@ struct TimelineView: View {
                 }
                 .disabled(session.lifetimeCount == 0)
             } label: {
-                Label("特殊项目", systemImage: "tray.full")
+                Label(
+                    "提醒与特殊项目",
+                    systemImage: "tray.full"
+                )
             }
         }
 

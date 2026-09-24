@@ -89,7 +89,7 @@ struct GeneralSettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Section("续费提醒") {
+            Section("订阅提醒") {
                 LabeledContent("通知状态") {
                     Label(notificationStatusTitle, systemImage: notificationStatusSymbol)
                         .foregroundStyle(notificationStatusColor)
@@ -110,19 +110,23 @@ struct GeneralSettingsView: View {
     }
 
     private var notificationStatusTitle: String {
-        switch services.renewalNotifications.status {
+        switch services.subscriptionNotifications.status {
         case .idle: AppLocalization.string("尚未检查")
-        case let .ready(scheduledCount):
-            AppLocalization.string(scheduledCount > 0 ? "已安排" : "已送达或无需重排")
-        case .noAutomaticRenewals: AppLocalization.string("暂无提醒")
+        case let .ready(scheduledCount, deferredCount, failedCount):
+            if deferredCount > 0 || failedCount > 0 {
+                AppLocalization.string("部分待重试")
+            } else {
+                AppLocalization.string(scheduledCount > 0 ? "已安排" : "已送达或无需重排")
+            }
+        case .noReminders: AppLocalization.string("暂无提醒")
         case .denied: AppLocalization.string("通知已关闭")
         case .failed: AppLocalization.string("安排失败")
         }
     }
 
     private var notificationStatusSymbol: String {
-        switch services.renewalNotifications.status {
-        case .idle, .noAutomaticRenewals: "bell"
+        switch services.subscriptionNotifications.status {
+        case .idle, .noReminders: "bell"
         case .ready: "bell.badge"
         case .denied: "bell.slash"
         case .failed: "exclamationmark.triangle"
@@ -130,31 +134,38 @@ struct GeneralSettingsView: View {
     }
 
     private var notificationStatusColor: Color {
-        switch services.renewalNotifications.status {
+        switch services.subscriptionNotifications.status {
         case .denied, .failed: .orange
         default: .secondary
         }
     }
 
     private var notificationStatusDetail: String {
-        switch services.renewalNotifications.status {
+        switch services.subscriptionNotifications.status {
         case .idle:
-            AppLocalization.string("打开主窗口后会检查自动续费提醒。")
-        case let .ready(scheduledCount):
-            if scheduledCount > 0 {
-                String(
-                    format: AppLocalization.string("已为 %d 项自动续费安排到期日确认提醒。"),
+            return AppLocalization.string("打开主窗口后会检查订阅提醒。")
+        case let .ready(scheduledCount, deferredCount, failedCount):
+            if deferredCount > 0 || failedCount > 0 {
+                return String(
+                    format: AppLocalization.string("已安排 %d 项，%d 项延后，%d 项失败。"),
+                    scheduledCount,
+                    deferredCount,
+                    failedCount
+                )
+            } else if scheduledCount > 0 {
+                return String(
+                    format: AppLocalization.string("已安排 %d 项到期提醒。"),
                     scheduledCount
                 )
             } else {
-                AppLocalization.string("今日提醒已处理；确认续费或修改订阅后，旧通知会自动清理。")
+                return AppLocalization.string("今日提醒已处理；订阅日期或提醒设置变化后会自动重新核对。")
             }
-        case .noAutomaticRenewals:
-            AppLocalization.string("启用订阅的“自动续费”后，会在到期日提醒你确认。")
+        case .noReminders:
+            return AppLocalization.string("启用“到期提醒”或“服务商自动续费”后，会在到期日发送提醒。")
         case .denied:
-            AppLocalization.string("Periodic 无法发送提醒。请在“系统设置 > 通知”中允许通知。")
+            return AppLocalization.string("Periodic 无法发送提醒。请在“系统设置 > 通知”中允许通知。")
         case .failed:
-            AppLocalization.string("无法更新续费提醒。请稍后重新打开主窗口再试。")
+            return AppLocalization.string("无法更新订阅提醒。请稍后重新打开主窗口再试。")
         }
     }
 }

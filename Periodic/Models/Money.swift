@@ -85,6 +85,21 @@ struct Money: Hashable, Codable, Sendable {
         decimalValue * 12 / Decimal(cycleMonths)
     }
 
+    func prorated(from sourceCycleMonths: Int, to targetCycleMonths: Int) -> Money? {
+        guard sourceCycleMonths > 0, targetCycleMonths > 0 else { return nil }
+        var value = Decimal(minorUnits) * Decimal(targetCycleMonths)
+            / Decimal(sourceCycleMonths)
+        var rounded = Decimal()
+        NSDecimalRound(&rounded, &value, 0, .plain)
+        guard rounded <= Decimal(Int64.max), rounded >= Decimal(Int64.min) else {
+            return nil
+        }
+        return Money(
+            minorUnits: NSDecimalNumber(decimal: rounded).int64Value,
+            currency: currency
+        )
+    }
+
     static func display(
         _ amount: Decimal,
         currency: CurrencyCode,

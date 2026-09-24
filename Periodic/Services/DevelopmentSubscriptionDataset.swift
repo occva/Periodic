@@ -31,6 +31,12 @@ enum DevelopmentSubscriptionDataset {
                 LocalDate(dayNumber: $0.dayNumber - max(1, cycle.rawValue * 30) + 1)
             } ?? (isLifetime ? LocalDate(dayNumber: referenceDate.dayNumber - index) : nil)
             let amount = Int64((index % 97) + 1) * minorUnitFactor(for: currency)
+            let renewalSampleStart = LocalDate(dayNumber: referenceDate.dayNumber - 7)
+            let automaticallyRenews = !isLifetime
+                && !isUndated
+                && !isInactive
+                && (expiry.map { $0 >= renewalSampleStart } ?? false)
+                && ((expiry.map { $0 <= referenceDate } ?? false) || index.isMultiple(of: 11))
 
             return SubscriptionCreateInput(
                 id: UUID(),
@@ -46,7 +52,8 @@ enum DevelopmentSubscriptionDataset {
                 cycleMonths: isLifetime ? nil : cycle.rawValue,
                 money: Money(minorUnits: amount, currency: currency),
                 note: "多时间点测试数据 #\(index + 1)",
-                reminderEnabled: !isLifetime
+                reminderEnabled: !isLifetime,
+                automaticallyRenews: automaticallyRenews
             )
         }
     }

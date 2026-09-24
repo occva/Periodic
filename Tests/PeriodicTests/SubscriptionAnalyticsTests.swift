@@ -27,6 +27,12 @@ struct SubscriptionAnalyticsTests {
         #expect(Set(inputs.map(\.managementState)) == Set(ManagementState.allCases))
         #expect(Set(inputs.map(\.billingKind)) == Set(BillingKind.allCases))
         #expect(inputs.contains { $0.billingKind == .recurring && $0.expiry == nil })
+        #expect(inputs.contains {
+            $0.automaticallyRenews && $0.expiry == anchor
+        })
+        #expect(inputs.contains {
+            $0.automaticallyRenews && ($0.expiry.map { $0 > anchor } ?? false)
+        })
         #expect(inputs.contains { $0.billingKind == .lifetime && $0.expiry == nil })
 
         let datedItems = inputs.compactMap(\.expiry)
@@ -136,15 +142,23 @@ struct SubscriptionAnalyticsTests {
 
     @Test func expiryStatusUsesExactRelativeDayCount() {
         let today = makeListItem(makeInput(name: "今天", expiry: anchor))
+        let tomorrow = makeListItem(
+            makeInput(name: "明天", expiry: LocalDate(dayNumber: anchor.dayNumber + 1))
+        )
         let near = makeListItem(
             makeInput(name: "临期", expiry: LocalDate(dayNumber: anchor.dayNumber + 7))
+        )
+        let eightDays = makeListItem(
+            makeInput(name: "八天", expiry: LocalDate(dayNumber: anchor.dayNumber + 8))
         )
         let far = makeListItem(
             makeInput(name: "远期", expiry: LocalDate(dayNumber: anchor.dayNumber + 61))
         )
 
         #expect(today.expiryStatus(relativeTo: anchor) == "今天到期")
+        #expect(tomorrow.expiryStatus(relativeTo: anchor) == "1 天内")
         #expect(near.expiryStatus(relativeTo: anchor) == "7 天内")
+        #expect(eightDays.expiryStatus(relativeTo: anchor) == "8 天内")
         #expect(far.expiryStatus(relativeTo: anchor) == "61 天内")
     }
 
@@ -238,6 +252,45 @@ struct SubscriptionAnalyticsTests {
                 == ["较早人民币订阅", "较晚人民币订阅"]
         )
         #expect(analytics.forecastItems(for: .usd).map(\.name) == ["美元订阅"])
+    }
+
+    @Test func pendingRenewalsAreASubsetOfTheUnifiedReminderList() {
+        let overdueRenewal = makeInput(
+            name: "待确认",
+            expiry: LocalDate(dayNumber: anchor.dayNumber - 1),
+            automaticallyRenews: true
+        )
+        let upcomingReminder = makeInput(
+            name: "即将到期",
+            expiry: LocalDate(dayNumber: anchor.dayNumber + 7)
+        )
+        let distantReminder = makeInput(
+            name: "远期提醒",
+            expiry: LocalDate(dayNumber: anchor.dayNumber + 60)
+        )
+        let expiredOrdinaryReminder = makeInput(
+            name: "普通历史过期",
+            expiry: LocalDate(dayNumber: anchor.dayNumber - 2)
+        )
+        let disabledReminder = makeInput(
+            name: "未启用提醒",
+            expiry: anchor,
+            reminderEnabled: false
+        )
+        let analytics = SubscriptionAnalytics(
+            items: [
+                overdueRenewal,
+                upcomingReminder,
+                distantReminder,
+                expiredOrdinaryReminder,
+                disabledReminder,
+            ]
+                .map(makeListItem),
+            referenceDate: anchor
+        )
+
+        #expect(analytics.automaticRenewalDueItems.map(\.name) == ["待确认"])
+        #expect(analytics.reminderItems(within: 15).map(\.name) == ["待确认", "即将到期"])
     }
 
     @MainActor
@@ -363,7 +416,9 @@ struct SubscriptionAnalyticsTests {
         name: String,
         expiry: LocalDate,
         currency: CurrencyCode = .cny,
-        category: ServiceCategory = .tools
+        category: ServiceCategory = .tools,
+        reminderEnabled: Bool = true,
+        automaticallyRenews: Bool = false
     ) -> SubscriptionCreateInput {
         SubscriptionCreateInput(
             id: UUID(),
@@ -379,7 +434,8 @@ struct SubscriptionAnalyticsTests {
             cycleMonths: 1,
             money: Money(minorUnits: 1_000, currency: currency),
             note: "",
-            reminderEnabled: true
+            reminderEnabled: reminderEnabled,
+            automaticallyRenews: automaticallyRenews
         )
     }
 
@@ -400,6 +456,7 @@ struct SubscriptionAnalyticsTests {
                 money: input.money,
                 note: input.note,
                 reminderEnabled: input.reminderEnabled,
+                automaticallyRenews: input.automaticallyRenews,
                 revision: 1,
                 createdAt: .distantPast,
                 updatedAt: .distantPast

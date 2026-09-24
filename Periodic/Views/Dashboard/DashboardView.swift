@@ -85,10 +85,11 @@ struct DashboardView: View {
                 .help(monthlyForecastHelp)
                 SummaryMetricCard(title: "已过期", value: "\(analytics.expiredCount)", symbol: "exclamationmark.circle")
                 SummaryMetricCard(
-                    title: "待确认",
+                    title: "待续费",
                     value: "\(session.automaticRenewalDueItems.count)",
                     detail: "到期自动续费",
-                    symbol: "checkmark.message"
+                    symbol: "checkmark.message",
+                    action: { session.presentReminderCenter(scope: .pendingRenewal) }
                 )
             }
         }

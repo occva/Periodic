@@ -186,7 +186,7 @@ struct SubscriptionEditorView: View {
                         Toggle("服务商自动续费", isOn: $automaticallyRenews)
                             .disabled(managementState != .active)
                             .accessibilityHint("到期日提醒确认，Periodic 不会自动扣款或延长周期")
-                        Text("到期日会进入待确认列表；确认已续费后，才会生成下一周期记录。")
+                        Text("到期提醒会进入全部提醒和今日到期；服务商自动续费到期后还会进入待续费。")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }

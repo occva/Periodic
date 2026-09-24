@@ -107,6 +107,27 @@ struct SubscriptionAnalytics: Sendable {
             .sorted(by: expiryAscending)
     }
 
+    var automaticRenewalDueItems: [SubscriptionListItem] {
+        items.filter { $0.isPendingAutomaticRenewal(relativeTo: referenceDate) }
+        .sorted(by: expiryAscending)
+    }
+
+    func reminderItems(within days: Int) -> [SubscriptionListItem] {
+        items.filter { item in
+            guard item.managementState == .active,
+                  item.billingKindValue == .recurring,
+                  item.reminderEnabled || item.automaticallyRenews,
+                  let remainingDays = item.remainingDayCount(relativeTo: referenceDate) else {
+                return false
+            }
+            if item.automaticallyRenews && remainingDays <= 0 {
+                return true
+            }
+            return (0...days).contains(remainingDays)
+        }
+        .sorted(by: expiryAscending)
+    }
+
     var categoryForecasts: [CategoryForecast] {
         Dictionary(grouping: forecastItems) {
             CategoryForecast.ID(category: $0.categoryValue, currency: $0.money.currency)

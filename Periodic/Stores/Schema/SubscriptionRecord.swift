@@ -76,11 +76,23 @@ final class SubscriptionRecord {
     func applyRenewal(
         start: LocalDate,
         expiry: LocalDate,
+        cycleMonths: Int,
+        money: Money,
         now: Date = Date()
     ) {
         managementStateRaw = ManagementState.active.rawValue
         periodStartDay = start.dayNumber
         expiryDay = expiry.dayNumber
+        self.cycleMonths = cycleMonths
+        periodAmountMinor = money.minorUnits
+        currencyCode = money.currency.rawValue
+        currencyScale = money.currency.scale
+        revision += 1
+        updatedAt = now
+    }
+
+    func applyNonRenewal(now: Date = Date()) {
+        automaticallyRenews = false
         revision += 1
         updatedAt = now
     }
