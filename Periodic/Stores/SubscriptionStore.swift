@@ -193,6 +193,43 @@ actor SubscriptionStore {
         }
     }
 
+    func deletePeriod(_ input: SubscriptionPeriodDeleteInput) throws {
+        do {
+            let subscriptionID = input.original.subscriptionID
+            var subscriptionDescriptor = FetchDescriptor<SubscriptionRecord>(
+                predicate: #Predicate { $0.id == subscriptionID }
+            )
+            subscriptionDescriptor.fetchLimit = 1
+            guard let subscription = try modelContext.fetch(subscriptionDescriptor).first else {
+                throw StoreError.notFound
+            }
+            guard subscription.revision == input.expectedSubscriptionRevision else {
+                throw StoreError.revisionConflict
+            }
+
+            let periodID = input.original.id
+            var periodDescriptor = FetchDescriptor<SubscriptionPeriodRecord>(
+                predicate: #Predicate {
+                    $0.id == periodID && $0.subscriptionID == subscriptionID
+                }
+            )
+            periodDescriptor.fetchLimit = 1
+            guard let period = try modelContext.fetch(periodDescriptor).first else {
+                throw StoreError.periodNotFound
+            }
+            guard try makePeriodDTO(period) == input.original else {
+                throw StoreError.revisionConflict
+            }
+
+            modelContext.delete(period)
+            subscription.markHistoryChanged()
+            try modelContext.save()
+        } catch {
+            modelContext.rollback()
+            throw error
+        }
+    }
+
     func confirmAutomaticRenewal(
         _ request: SubscriptionRenewalRequest,
         referenceDate: LocalDate = .today

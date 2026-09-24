@@ -182,4 +182,59 @@ struct SubscriptionPeriodEditingTests {
             // Expected: the first edit incremented the parent subscription revision.
         }
     }
+
+    @MainActor
+    @Test func deletingHistoryKeepsCurrentSubscriptionValuesUnchanged() async throws {
+        let controller = PersistenceController()
+        let container = try controller.makeContainer(
+            schema: Schema([SubscriptionRecord.self, SubscriptionPeriodRecord.self]),
+            inMemory: true
+        )
+        let store = SubscriptionStore(modelContainer: container)
+        let start = LocalDate(dayNumber: 21_000)
+        let expiry = LocalDate(dayNumber: start.dayNumber + 29)
+        let subscription = SubscriptionCreateInput(
+            id: UUID(),
+            name: "可删除周期",
+            symbolName: "calendar",
+            iconResourceName: nil,
+            iconURLString: nil,
+            category: .tools,
+            managementState: .active,
+            billingKind: .recurring,
+            periodStart: start,
+            expiry: expiry,
+            cycleMonths: 1,
+            money: Money(minorUnits: 8_100, currency: .cny),
+            note: "",
+            reminderEnabled: true
+        )
+        _ = try await store.create(subscription)
+        let period = try #require(try await store.fetchPeriods(for: subscription.id).first)
+
+        try await store.deletePeriod(
+            SubscriptionPeriodDeleteInput(
+                original: period,
+                expectedSubscriptionRevision: 1
+            )
+        )
+
+        #expect(try await store.fetchPeriods(for: subscription.id).isEmpty)
+        let currentSubscription = try #require(try await store.fetchAll().first)
+        #expect(currentSubscription.periodStart == start)
+        #expect(currentSubscription.expiry == expiry)
+        #expect(currentSubscription.revision == 2)
+
+        do {
+            try await store.deletePeriod(
+                SubscriptionPeriodDeleteInput(
+                    original: period,
+                    expectedSubscriptionRevision: 1
+                )
+            )
+            Issue.record("使用旧版本再次删除周期记录应失败。")
+        } catch SubscriptionStore.StoreError.revisionConflict {
+            // Expected: deleting the period incremented the parent subscription revision.
+        }
+    }
 }

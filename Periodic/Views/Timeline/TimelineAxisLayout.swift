@@ -91,6 +91,12 @@ struct TimelineAxisLayout {
         return width * CGFloat(offset) / CGFloat(span)
     }
 
+    func dayOffset(forHorizontalScroll deltaX: CGFloat, viewportWidth: CGFloat) -> Double {
+        guard viewportWidth > 0 else { return 0 }
+        let visibleDayCount = max(end.dayNumber - start.dayNumber, 1)
+        return -Double(deltaX) * Double(visibleDayCount) / Double(viewportWidth)
+    }
+
     func majorLabel(for date: LocalDate) -> String {
         let parts = date.displayText.split(separator: "/")
         guard parts.count == 3 else { return date.displayText }

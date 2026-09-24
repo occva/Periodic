@@ -19,4 +19,15 @@ struct TimelineAxisLayoutTests {
         let fiveYearLayout = TimelineAxisLayout(centerDate: centerDate, range: .fiveYears)
         #expect(fiveYearLayout.minorLabel(for: today) == "9")
     }
+
+    @Test func horizontalScrollMapsViewportDistanceToVisibleDateRange() {
+        let layout = TimelineAxisLayout(centerDate: Date(), range: .sixMonths)
+        let visibleDayCount = layout.end.dayNumber - layout.start.dayNumber
+
+        #expect(
+            layout.dayOffset(forHorizontalScroll: -1_600, viewportWidth: 1_600)
+                == Double(visibleDayCount)
+        )
+        #expect(layout.dayOffset(forHorizontalScroll: 20, viewportWidth: 0) == 0)
+    }
 }

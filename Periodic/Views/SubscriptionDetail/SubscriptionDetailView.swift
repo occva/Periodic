@@ -10,12 +10,15 @@ struct SubscriptionDetailView: View {
     let loadPeriods: @MainActor (UUID) async throws -> [SubscriptionPeriodDTO]
     let addPeriod: @MainActor (SubscriptionPeriodAddInput) async throws -> Void
     let updatePeriod: @MainActor (SubscriptionPeriodUpdateInput) async throws -> Void
+    let deletePeriod: @MainActor (SubscriptionPeriodDeleteInput) async throws -> Void
     let confirmAutomaticRenewal: @MainActor (SubscriptionRenewalRequest) async throws -> Void
 
     @State private var periods: [SubscriptionPeriodDTO] = []
     @State private var isLoading = false
     @State private var periodDraft: SubscriptionPeriodDraft?
     @State private var isSavingPeriod = false
+    @State private var periodPendingDeletion: SubscriptionPeriodDTO?
+    @State private var isDeletingPeriod = false
     @State private var isConfirmingRenewal = false
     @State private var isPresentingRenewalConfirmation = false
     @State private var error: PresentedError?
@@ -55,7 +58,9 @@ struct SubscriptionDetailView: View {
                     Button("添加记录", systemImage: "plus") {
                         beginPeriodCreation()
                     }
-                    .disabled(periodDraft != nil || isSavingPeriod || isLoading)
+                    .disabled(
+                        periodDraft != nil || isSavingPeriod || isDeletingPeriod || isLoading
+                    )
                 }
 
                 Button(dismissButtonTitle) {
@@ -88,6 +93,22 @@ struct SubscriptionDetailView: View {
                     "当前到期日为 \(renewalPreview.previousExpiry.displayText)。确认后将更新为 \(renewalPreview.nextStart.displayText) 至 \(renewalPreview.nextExpiry.displayText)，并按当前报价添加一条续费周期记录。"
                 )
             }
+        }
+        .confirmationDialog(
+            "删除这条周期记录？",
+            isPresented: Binding(
+                get: { periodPendingDeletion != nil },
+                set: { if !$0 { periodPendingDeletion = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: periodPendingDeletion
+        ) { period in
+            Button("删除周期记录", role: .destructive) {
+                delete(period)
+            }
+            Button("取消", role: .cancel) {}
+        } message: { _ in
+            Text("此操作只删除历史记录，不会修改订阅当前的开始日期或到期日。")
         }
         .accessibilityIdentifier("subscription-detail")
     }
@@ -288,13 +309,22 @@ struct SubscriptionDetailView: View {
                         }
                     } else {
                         if let period = row.period {
-                            Button("编辑") {
-                                beginPeriodEditing(period)
+                            HStack(spacing: 8) {
+                                Button("编辑", systemImage: "pencil") {
+                                    beginPeriodEditing(period)
+                                }
+                                .labelStyle(.iconOnly)
+                                .buttonStyle(.plain)
+                                .help("编辑周期记录")
+
+                                Button("删除", systemImage: "trash", role: .destructive) {
+                                    periodPendingDeletion = period
+                                }
+                                .labelStyle(.iconOnly)
+                                .buttonStyle(.plain)
+                                .help("删除周期记录")
                             }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                            .disabled(periodDraft != nil)
-                            .help("直接编辑此行")
+                            .disabled(periodDraft != nil || isDeletingPeriod)
                         }
                     }
                 }
@@ -360,6 +390,25 @@ struct SubscriptionDetailView: View {
             } catch {
                 self.error = PresentedError(error, title: "无法保存周期记录")
                 isSavingPeriod = false
+            }
+        }
+    }
+
+    private func delete(_ period: SubscriptionPeriodDTO) {
+        isDeletingPeriod = true
+        let input = SubscriptionPeriodDeleteInput(
+            original: period,
+            expectedSubscriptionRevision: subscription.revision
+        )
+        Task { @MainActor in
+            do {
+                try await deletePeriod(input)
+                periodPendingDeletion = nil
+                isDeletingPeriod = false
+                await reload()
+            } catch {
+                self.error = PresentedError(error, title: "无法删除周期记录")
+                isDeletingPeriod = false
             }
         }
     }

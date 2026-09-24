@@ -7,6 +7,7 @@ struct TimelineGridView: View {
     let onEdit: (UUID) -> Void
     let onDetails: (UUID) -> Void
     let onCenter: (LocalDate) -> Void
+    let onHorizontalScroll: (CGFloat, CGFloat, TimelineAxisLayout) -> Void
 
     private let axisHeight: CGFloat = 58
     private let rowHeight: CGFloat = 34
@@ -21,6 +22,8 @@ struct TimelineGridView: View {
 
                 ZStack {
                     grid(layout: layout, width: canvasWidth)
+                        .frame(width: canvasWidth, alignment: .leading)
+                        .frame(maxHeight: .infinity, alignment: .topLeading)
 
                     if items.isEmpty {
                         ContentUnavailableView("没有到期项目", systemImage: "calendar")
@@ -46,6 +49,11 @@ struct TimelineGridView: View {
                 .frame(height: max(0, proxy.size.height - axisHeight))
             }
             .frame(width: canvasWidth)
+            .background {
+                HorizontalScrollEventView { deltaX, viewportWidth in
+                    onHorizontalScroll(deltaX, viewportWidth, layout)
+                }
+            }
         }
         .frame(minHeight: 300)
         .accessibilityElement(children: .contain)

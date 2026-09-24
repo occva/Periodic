@@ -116,6 +116,14 @@ struct ContentView: View {
                         services.notifySubscriptionDataChanged()
                         await session.reload(using: services)
                     },
+                    deletePeriod: { input in
+                        guard let store = services.subscriptionStore else {
+                            throw ContentViewError.storeUnavailable
+                        }
+                        try await store.deletePeriod(input)
+                        services.notifySubscriptionDataChanged()
+                        await session.reload(using: services)
+                    },
                     confirmAutomaticRenewal: { request in
                         guard let store = services.subscriptionStore else {
                             throw ContentViewError.storeUnavailable

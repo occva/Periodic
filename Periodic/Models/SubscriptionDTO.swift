@@ -148,6 +148,11 @@ struct SubscriptionPeriodUpdateInput: Sendable {
     let money: Money
 }
 
+struct SubscriptionPeriodDeleteInput: Sendable {
+    let original: SubscriptionPeriodDTO
+    let expectedSubscriptionRevision: Int64
+}
+
 enum SubscriptionUpdateHistoryPolicy: Sendable {
     case currentOnly
     case appendPeriodRecord

@@ -86,8 +86,14 @@
 "金额" = "Amount";
 "添加记录" = "Add Record";
 "编辑" = "Edit";
+"删除" = "Delete";
 "取消添加" = "Cancel Add";
 "取消编辑" = "Cancel Editing";
+"删除这条周期记录？" = "Delete This Period Record?";
+"删除周期记录" = "Delete Period Record";
+"编辑周期记录" = "Edit Period Record";
+"此操作只删除历史记录，不会修改订阅当前的开始日期或到期日。" = "This removes only the history record. The subscription's current start and expiration dates will not change.";
+"无法删除周期记录" = "Unable to Delete Period Record";
 "暂无订阅次数" = "No Subscription History";
 "具有完整开始和结束日期的新订阅会在这里记录首次周期，也可以手动添加记录。" = "New subscriptions with complete start and end dates record their first period here. You can also add a record manually.";
 "正在读取订阅次数…" = "Loading subscription history…";

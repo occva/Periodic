@@ -3,6 +3,7 @@ import SwiftUI
 struct TimelineView: View {
     @Bindable var session: WindowSession
     @State private var centerDate = Date()
+    @State private var pendingHorizontalDayOffset = 0.0
     @State private var isUpcomingExpanded = true
     @State private var specialCollection: TimelineSpecialCollection?
 
@@ -14,7 +15,8 @@ struct TimelineView: View {
                 range: session.timelineRange,
                 onEdit: session.presentEditor(for:),
                 onDetails: session.presentDetails(for:),
-                onCenter: { centerDate = $0.date() }
+                onCenter: { centerTimeline(on: $0.date()) },
+                onHorizontalScroll: panTimeline
             )
             Divider()
             upcomingSection
@@ -29,6 +31,9 @@ struct TimelineView: View {
             )
         }
         .accessibilityIdentifier("timeline-page")
+        .onChange(of: session.timelineRange) { _, _ in
+            pendingHorizontalDayOffset = 0
+        }
     }
 
     private var upcomingSection: some View {
@@ -144,7 +149,7 @@ struct TimelineView: View {
         ToolbarItemGroup(placement: .navigation) {
             Button("前一范围", systemImage: "chevron.left") { shiftRange(by: -1) }
                 .labelStyle(.iconOnly)
-            Button("今天") { centerDate = Date() }
+            Button("今天") { centerTimeline(on: Date()) }
             Button("后一范围", systemImage: "chevron.right") { shiftRange(by: 1) }
                 .labelStyle(.iconOnly)
         }
@@ -224,9 +229,34 @@ struct TimelineView: View {
     }
 
     private func shiftRange(by direction: Int) {
+        pendingHorizontalDayOffset = 0
         centerDate = Calendar.current.date(
             byAdding: .month,
             value: session.timelineRange.rawValue * direction,
+            to: centerDate
+        ) ?? centerDate
+    }
+
+    private func centerTimeline(on date: Date) {
+        pendingHorizontalDayOffset = 0
+        centerDate = date
+    }
+
+    private func panTimeline(
+        deltaX: CGFloat,
+        viewportWidth: CGFloat,
+        layout: TimelineAxisLayout
+    ) {
+        pendingHorizontalDayOffset += layout.dayOffset(
+            forHorizontalScroll: deltaX,
+            viewportWidth: viewportWidth
+        )
+        let wholeDays = Int(pendingHorizontalDayOffset.rounded(.towardZero))
+        guard wholeDays != 0 else { return }
+        pendingHorizontalDayOffset -= Double(wholeDays)
+        centerDate = Calendar.current.date(
+            byAdding: .day,
+            value: wholeDays,
             to: centerDate
         ) ?? centerDate
     }
