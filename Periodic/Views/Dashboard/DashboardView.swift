@@ -75,7 +75,8 @@ struct DashboardView: View {
                     title: "当前有效",
                     value: "\(analytics.effectiveRecurringCount + analytics.effectiveLifetimeCount)",
                     detail: "周期 \(analytics.effectiveRecurringCount) · 终生 \(analytics.effectiveLifetimeCount)",
-                    symbol: "checkmark.circle"
+                    symbol: "checkmark.circle",
+                    valueAccessibilityIdentifier: "dashboard-active-count"
                 )
                 SummaryMetricCard(
                     title: "本月预估",

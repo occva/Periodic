@@ -2,7 +2,7 @@ import Foundation
 
 enum CurrencyPreferences {
     static let defaultCurrencies: [CurrencyCode] = [.cny, .jpy, .kwd, .usd]
-    #if DEBUG
+    #if DEBUG || TEST_SUPPORT
     static let developmentSampleCurrencies = CurrencyCode.allCases
     #endif
 

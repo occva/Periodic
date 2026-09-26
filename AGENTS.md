@@ -158,3 +158,12 @@ Persistence / System Adapter
 - 重构以可观察行为不变为前提，分步进行并保持每一步可验证；不要把大规模重构夹带进小功能。
 - 公共接口、数据模型或目录职责改变时，同步调用方、迁移、测试和文档。
 - 提交信息使用统一的语义前缀，如 `feat:`、`fix:`、`refactor:`、`docs:`、`test:`、`chore:`，描述单一、清晰的变更目的。
+- 同工作区多模块修改统一到一个 commit 提交
+
+```
+type: concise title
+
+- change point
+- change point
+- change point
+```

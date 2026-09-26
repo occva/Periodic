@@ -45,16 +45,12 @@ actor SubscriptionStore {
     }
 
     func create(_ input: SubscriptionCreateInput) throws -> UUID {
-        do {
+        try commit {
             modelContext.insert(SubscriptionRecord(input: input))
             if let period = initialPeriod(for: input) {
                 modelContext.insert(SubscriptionPeriodRecord(input: period))
             }
-            try modelContext.save()
             return input.id
-        } catch {
-            modelContext.rollback()
-            throw error
         }
     }
 
@@ -62,7 +58,7 @@ actor SubscriptionStore {
         _ inputs: [SubscriptionCreateInput],
         additionalPeriods: [SubscriptionPeriodCreateInput] = []
     ) throws {
-        do {
+        try commit {
             for input in inputs {
                 modelContext.insert(SubscriptionRecord(input: input))
                 if let period = initialPeriod(for: input) {
@@ -72,10 +68,6 @@ actor SubscriptionStore {
             for period in additionalPeriods {
                 modelContext.insert(SubscriptionPeriodRecord(input: period))
             }
-            try modelContext.save()
-        } catch {
-            modelContext.rollback()
-            throw error
         }
     }
 
@@ -111,18 +103,8 @@ actor SubscriptionStore {
         expectedRevision: Int64,
         historyPolicy: SubscriptionUpdateHistoryPolicy
     ) throws {
-        do {
-            let subscriptionID = input.id
-            var descriptor = FetchDescriptor<SubscriptionRecord>(
-                predicate: #Predicate { $0.id == subscriptionID }
-            )
-            descriptor.fetchLimit = 1
-            guard let record = try modelContext.fetch(descriptor).first else {
-                throw StoreError.notFound
-            }
-            guard record.revision == expectedRevision else {
-                throw StoreError.revisionConflict
-            }
+        try commit {
+            let record = try fetchSubscription(id: input.id, expectedRevision: expectedRevision)
             switch historyPolicy {
             case .currentOnly:
                 if input.billingKind == .lifetime {
@@ -138,107 +120,41 @@ actor SubscriptionStore {
                 modelContext.insert(SubscriptionPeriodRecord(input: period))
             }
             record.apply(input)
-            try modelContext.save()
-        } catch {
-            modelContext.rollback()
-            throw error
         }
     }
 
     func addPeriod(_ input: SubscriptionPeriodAddInput) throws {
-        do {
-            let subscriptionID = input.period.subscriptionID
-            var descriptor = FetchDescriptor<SubscriptionRecord>(
-                predicate: #Predicate { $0.id == subscriptionID }
+        try commit {
+            let subscription = try fetchSubscription(
+                id: input.period.subscriptionID,
+                expectedRevision: input.expectedSubscriptionRevision
             )
-            descriptor.fetchLimit = 1
-            guard let subscription = try modelContext.fetch(descriptor).first else {
-                throw StoreError.notFound
-            }
-            guard subscription.revision == input.expectedSubscriptionRevision else {
-                throw StoreError.revisionConflict
-            }
-
             modelContext.insert(SubscriptionPeriodRecord(input: input.period))
             subscription.markHistoryChanged()
-            try modelContext.save()
-        } catch {
-            modelContext.rollback()
-            throw error
         }
     }
 
     func updatePeriod(_ input: SubscriptionPeriodUpdateInput) throws {
-        do {
-            let subscriptionID = input.original.subscriptionID
-            var subscriptionDescriptor = FetchDescriptor<SubscriptionRecord>(
-                predicate: #Predicate { $0.id == subscriptionID }
+        try commit {
+            let subscription = try fetchSubscription(
+                id: input.original.subscriptionID,
+                expectedRevision: input.expectedSubscriptionRevision
             )
-            subscriptionDescriptor.fetchLimit = 1
-            guard let subscription = try modelContext.fetch(subscriptionDescriptor).first else {
-                throw StoreError.notFound
-            }
-            guard subscription.revision == input.expectedSubscriptionRevision else {
-                throw StoreError.revisionConflict
-            }
-
-            let periodID = input.original.id
-            var periodDescriptor = FetchDescriptor<SubscriptionPeriodRecord>(
-                predicate: #Predicate {
-                    $0.id == periodID && $0.subscriptionID == subscriptionID
-                }
-            )
-            periodDescriptor.fetchLimit = 1
-            guard let period = try modelContext.fetch(periodDescriptor).first else {
-                throw StoreError.periodNotFound
-            }
-            guard try makePeriodDTO(period) == input.original else {
-                throw StoreError.revisionConflict
-            }
-
+            let period = try period(matching: input.original)
             period.apply(input)
             subscription.markHistoryChanged()
-            try modelContext.save()
-        } catch {
-            modelContext.rollback()
-            throw error
         }
     }
 
     func deletePeriod(_ input: SubscriptionPeriodDeleteInput) throws {
-        do {
-            let subscriptionID = input.original.subscriptionID
-            var subscriptionDescriptor = FetchDescriptor<SubscriptionRecord>(
-                predicate: #Predicate { $0.id == subscriptionID }
+        try commit {
+            let subscription = try fetchSubscription(
+                id: input.original.subscriptionID,
+                expectedRevision: input.expectedSubscriptionRevision
             )
-            subscriptionDescriptor.fetchLimit = 1
-            guard let subscription = try modelContext.fetch(subscriptionDescriptor).first else {
-                throw StoreError.notFound
-            }
-            guard subscription.revision == input.expectedSubscriptionRevision else {
-                throw StoreError.revisionConflict
-            }
-
-            let periodID = input.original.id
-            var periodDescriptor = FetchDescriptor<SubscriptionPeriodRecord>(
-                predicate: #Predicate {
-                    $0.id == periodID && $0.subscriptionID == subscriptionID
-                }
-            )
-            periodDescriptor.fetchLimit = 1
-            guard let period = try modelContext.fetch(periodDescriptor).first else {
-                throw StoreError.periodNotFound
-            }
-            guard try makePeriodDTO(period) == input.original else {
-                throw StoreError.revisionConflict
-            }
-
+            let period = try period(matching: input.original)
             modelContext.delete(period)
             subscription.markHistoryChanged()
-            try modelContext.save()
-        } catch {
-            modelContext.rollback()
-            throw error
         }
     }
 
@@ -246,17 +162,12 @@ actor SubscriptionStore {
         _ request: SubscriptionRenewalRequest,
         referenceDate: LocalDate = .today
     ) throws -> SubscriptionRenewalPreview {
-        do {
-            let subscriptionID = request.subscriptionID
-            var descriptor = FetchDescriptor<SubscriptionRecord>(
-                predicate: #Predicate { $0.id == subscriptionID }
+        try commit {
+            let record = try fetchSubscription(
+                id: request.subscriptionID,
+                expectedRevision: request.expectedRevision
             )
-            descriptor.fetchLimit = 1
-            guard let record = try modelContext.fetch(descriptor).first else {
-                throw StoreError.notFound
-            }
-            guard record.revision == request.expectedRevision,
-                  record.expiryDay == request.expectedExpiry.dayNumber else {
+            guard record.expiryDay == request.expectedExpiry.dayNumber else {
                 throw StoreError.revisionConflict
             }
 
@@ -286,11 +197,7 @@ actor SubscriptionStore {
                 cycleMonths: preview.cycleMonths,
                 money: preview.money
             )
-            try modelContext.save()
             return preview
-        } catch {
-            modelContext.rollback()
-            throw error
         }
     }
 
@@ -298,17 +205,12 @@ actor SubscriptionStore {
         _ request: SubscriptionNonRenewalRequest,
         referenceDate: LocalDate = .today
     ) throws {
-        do {
-            let subscriptionID = request.subscriptionID
-            var descriptor = FetchDescriptor<SubscriptionRecord>(
-                predicate: #Predicate { $0.id == subscriptionID }
+        try commit {
+            let record = try fetchSubscription(
+                id: request.subscriptionID,
+                expectedRevision: request.expectedRevision
             )
-            descriptor.fetchLimit = 1
-            guard let record = try modelContext.fetch(descriptor).first else {
-                throw StoreError.notFound
-            }
-            guard record.revision == request.expectedRevision,
-                  record.expiryDay == request.expectedExpiry.dayNumber else {
+            guard record.expiryDay == request.expectedExpiry.dayNumber else {
                 throw StoreError.revisionConflict
             }
             let subscription = try makeDTO(record)
@@ -318,10 +220,6 @@ actor SubscriptionStore {
             )
 
             record.applyNonRenewal()
-            try modelContext.save()
-        } catch {
-            modelContext.rollback()
-            throw error
         }
     }
 
@@ -379,6 +277,55 @@ actor SubscriptionStore {
             modelContext.rollback()
             throw error
         }
+    }
+
+    private func commit<Value>(_ changes: () throws -> Value) throws -> Value {
+        do {
+            let value = try changes()
+            try modelContext.save()
+            return value
+        } catch {
+            modelContext.rollback()
+            throw error
+        }
+    }
+
+    private func fetchSubscription(
+        id: UUID,
+        expectedRevision: Int64
+    ) throws -> SubscriptionRecord {
+        let subscriptionID = id
+        var descriptor = FetchDescriptor<SubscriptionRecord>(
+            predicate: #Predicate { $0.id == subscriptionID }
+        )
+        descriptor.fetchLimit = 1
+        guard let record = try modelContext.fetch(descriptor).first else {
+            throw StoreError.notFound
+        }
+        guard record.revision == expectedRevision else {
+            throw StoreError.revisionConflict
+        }
+        return record
+    }
+
+    private func period(
+        matching original: SubscriptionPeriodDTO
+    ) throws -> SubscriptionPeriodRecord {
+        let periodID = original.id
+        let subscriptionID = original.subscriptionID
+        var descriptor = FetchDescriptor<SubscriptionPeriodRecord>(
+            predicate: #Predicate {
+                $0.id == periodID && $0.subscriptionID == subscriptionID
+            }
+        )
+        descriptor.fetchLimit = 1
+        guard let record = try modelContext.fetch(descriptor).first else {
+            throw StoreError.periodNotFound
+        }
+        guard try makePeriodDTO(record) == original else {
+            throw StoreError.revisionConflict
+        }
+        return record
     }
 
     private func makeDTO(_ record: SubscriptionRecord) throws -> SubscriptionDTO {

@@ -171,6 +171,7 @@ struct SubscriptionEditorView: View {
 
                     if billingKind == .recurring {
                         Toggle("设置到期日期", isOn: $hasExpiryDate)
+                            .accessibilityIdentifier("subscription-expiry-enabled")
                         if hasExpiryDate {
                             DatePicker("到期日期", selection: $expiryDate, displayedComponents: .date)
                                 .accessibilityIdentifier("subscription-expiry")

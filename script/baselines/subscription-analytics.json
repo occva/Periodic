@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "testIdentifier": "SubscriptionPerformanceTests/testThousandSubscriptionAnalyticsPerformance()",
+  "configuration": "Release",
+  "environment": {
+    "architecture": "arm64",
+    "operatingSystem": "27.0",
+    "xcodeBuild": "27A266a"
+  },
+  "metrics": {
+    "clockMonotonicSeconds": {
+      "average": 0.0302321208,
+      "maximumRegressionPercent": 25
+    },
+    "cpuInstructionsRetiredKiloInstructions": {
+      "average": 614179.9864,
+      "maximumRegressionPercent": 15
+    }
+  }
+}

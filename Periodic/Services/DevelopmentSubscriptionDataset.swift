@@ -1,6 +1,6 @@
 import Foundation
 
-#if DEBUG
+#if DEBUG || TEST_SUPPORT
 enum DevelopmentSubscriptionDataset {
     static let defaultCount = 240
 

@@ -28,7 +28,10 @@ final class PeriodicUITests: XCTestCase {
 
         let templateSidebar = app.descendants(matching: .any)["template-library-sidebar"]
         XCTAssertTrue(templateSidebar.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.searchFields["搜索模板名称或别名"].waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            app.descendants(matching: .any)["template-library-content"]
+                .waitForExistence(timeout: 5)
+        )
     }
 
     func testNewWindowUsesIndependentScene() {
@@ -139,10 +142,20 @@ final class PeriodicUITests: XCTestCase {
         let amountField = app.textFields["subscription-amount"]
         amountField.click()
         amountField.typeText("9.99")
-        app.buttons["save-subscription"].click()
+        let expiryToggle = app.descendants(matching: .any)["subscription-expiry-enabled"]
+        XCTAssertTrue(expiryToggle.waitForExistence(timeout: 3))
+        expiryToggle.click()
 
-        XCTAssertTrue(app.windows.element(boundBy: 0).staticTexts["1"].waitForExistence(timeout: 8))
-        XCTAssertTrue(app.windows.element(boundBy: 1).staticTexts["1"].waitForExistence(timeout: 8))
+        let saveButton = app.buttons["save-subscription"]
+        saveButton.click()
+        XCTAssertFalse(saveButton.waitForExistence(timeout: 3))
+
+        for index in 0..<dashboards.count {
+            let activeCount = dashboards.element(boundBy: index)
+                .staticTexts["dashboard-active-count"]
+            XCTAssertTrue(activeCount.waitForExistence(timeout: 8))
+            XCTAssertEqual(activeCount.value as? String, "1")
+        }
     }
 
 }

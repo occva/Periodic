@@ -5,6 +5,7 @@ struct SummaryMetricCard: View {
     let value: String
     var detail: String?
     let symbol: String
+    var valueAccessibilityIdentifier: String?
     var action: (() -> Void)?
 
     var body: some View {
@@ -27,9 +28,7 @@ struct SummaryMetricCard: View {
                 Image(systemName: symbol)
             }
             .foregroundStyle(.secondary)
-            Text(value)
-                .font(.system(.title, design: .rounded, weight: .semibold))
-                .monospacedDigit()
+            valueText
             if let detail {
                 Text(detail).font(.caption).foregroundStyle(.secondary)
             }
@@ -37,5 +36,17 @@ struct SummaryMetricCard: View {
         .frame(maxWidth: .infinity, minHeight: 92, alignment: .topLeading)
         .padding(14)
         .glassEffect(.regular, in: .rect(cornerRadius: 14))
+    }
+
+    @ViewBuilder
+    private var valueText: some View {
+        let text = Text(value)
+            .font(.system(.title, design: .rounded, weight: .semibold))
+            .monospacedDigit()
+        if let valueAccessibilityIdentifier {
+            text.accessibilityIdentifier(valueAccessibilityIdentifier)
+        } else {
+            text
+        }
     }
 }
