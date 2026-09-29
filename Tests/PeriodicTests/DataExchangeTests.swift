@@ -18,6 +18,7 @@ struct DataExchangeTests {
         #expect(decoded.snapshot == snapshot)
         #expect(decoded.manifest.tables.subscriptions == 1)
         #expect(decoded.manifest.tables.periods == 1)
+        #expect(decoded.manifest.tables.payments == 1)
 
         var changedFiles = encoded.files
         changedFiles["data/subscriptions.jsonl"]?.append(Data("tampered".utf8))
@@ -30,6 +31,237 @@ struct DataExchangeTests {
                 fileWrapper: DataPackageCodec.fileWrapper(for: tampered)
             )
         }
+    }
+
+    @Test func renewalPaymentWithoutCoverageSnapshotIsRejected() throws {
+        var snapshot = makeSnapshot()
+        let payment = try #require(snapshot.payments.first)
+        snapshot.payments = [
+            DataPackagePayment(
+                recordVersion: payment.recordVersion,
+                id: payment.id,
+                subscriptionID: payment.subscriptionID,
+                periodRecordID: nil,
+                kind: .renewal,
+                paymentDate: payment.paymentDate,
+                amountMinor: payment.amountMinor,
+                currency: payment.currency,
+                currencyScale: payment.currencyScale,
+                periodStart: nil,
+                periodEnd: nil,
+                note: payment.note,
+                attachmentAssetIDs: [],
+                revision: payment.revision,
+                createdAt: payment.createdAt,
+                updatedAt: payment.updatedAt
+            ),
+        ]
+
+        #expect(throws: DataExchangeError.self) {
+            try DataPackageCodec.encode(snapshot: snapshot, assets: [:])
+        }
+    }
+
+    @Test func dataPackageIncludesOrderedPaymentScreenshotAssets() throws {
+        let firstImageData = try #require(Data(base64Encoded: Self.onePixelPNG))
+        let secondImageData = firstImageData + Data([0])
+        let firstIdentifier = DataPackageCodec.sha256(firstImageData)
+        let secondIdentifier = DataPackageCodec.sha256(secondImageData)
+        var snapshot = makeSnapshot()
+        snapshot.payments[0].attachmentAssetIDs = [secondIdentifier, firstIdentifier]
+
+        let encoded = try DataPackageCodec.encode(
+            snapshot: snapshot,
+            assets: [
+                firstIdentifier: firstImageData,
+                secondIdentifier: secondImageData,
+            ]
+        )
+        let decoded = try DataPackageCodec.decode(
+            fileWrapper: DataPackageCodec.fileWrapper(for: encoded)
+        )
+
+        #expect(
+            decoded.snapshot.payments.first?.attachmentAssetIDs
+                == [secondIdentifier, firstIdentifier]
+        )
+        #expect(decoded.assets[firstIdentifier] == firstImageData)
+        #expect(decoded.assets[secondIdentifier] == secondImageData)
+        #expect(decoded.manifest.formatVersion == 4)
+    }
+
+    @Test func versionTwoPaymentWithoutScreenshotFieldRemainsReadable() throws {
+        let encoded = try DataPackageCodec.encode(snapshot: makeSnapshot(), assets: [:])
+        var files = encoded.files
+        let paymentData = try #require(files["data/payments.jsonl"])
+        var payment = try #require(
+            JSONSerialization.jsonObject(with: paymentData) as? [String: Any]
+        )
+        payment.removeValue(forKey: "attachmentAssetIDs")
+        files["data/payments.jsonl"] = try JSONSerialization.data(withJSONObject: payment)
+            + Data("\n".utf8)
+
+        let manifestData = try #require(files["manifest.json"])
+        var manifest = try #require(
+            JSONSerialization.jsonObject(with: manifestData) as? [String: Any]
+        )
+        manifest["formatVersion"] = 2
+        manifest["minimumReaderVersion"] = 2
+        files["manifest.json"] = try JSONSerialization.data(withJSONObject: manifest)
+        let checksums = Dictionary(
+            uniqueKeysWithValues: files
+                .filter { $0.key != "checksums.json" }
+                .map { ($0.key, DataPackageCodec.sha256($0.value)) }
+        )
+        files["checksums.json"] = try JSONEncoder().encode(checksums)
+
+        let decoded = try DataPackageCodec.decode(
+            fileWrapper: DataPackageCodec.fileWrapper(
+                for: EncodedDataPackage(
+                    files: files,
+                    preferredFilename: "V2.periodicdata"
+                )
+            )
+        )
+        #expect(decoded.manifest.formatVersion == 2)
+        #expect(decoded.snapshot.payments.first?.attachmentAssetIDs == [])
+    }
+
+    @Test func versionThreeSinglePaymentScreenshotRemainsReadable() throws {
+        let imageData = try #require(Data(base64Encoded: Self.onePixelPNG))
+        let identifier = DataPackageCodec.sha256(imageData)
+        var snapshot = makeSnapshot()
+        snapshot.payments[0].attachmentAssetIDs = [identifier]
+        let encoded = try DataPackageCodec.encode(
+            snapshot: snapshot,
+            assets: [identifier: imageData]
+        )
+        var files = encoded.files
+        let paymentData = try #require(files["data/payments.jsonl"])
+        var payment = try #require(
+            JSONSerialization.jsonObject(with: paymentData) as? [String: Any]
+        )
+        payment["attachmentAssetID"] = identifier
+        payment.removeValue(forKey: "attachmentAssetIDs")
+        files["data/payments.jsonl"] = try JSONSerialization.data(withJSONObject: payment)
+            + Data("\n".utf8)
+
+        let manifestData = try #require(files["manifest.json"])
+        var manifest = try #require(
+            JSONSerialization.jsonObject(with: manifestData) as? [String: Any]
+        )
+        manifest["formatVersion"] = 3
+        manifest["minimumReaderVersion"] = 3
+        files["manifest.json"] = try JSONSerialization.data(withJSONObject: manifest)
+        let checksums = Dictionary(
+            uniqueKeysWithValues: files
+                .filter { $0.key != "checksums.json" }
+                .map { ($0.key, DataPackageCodec.sha256($0.value)) }
+        )
+        files["checksums.json"] = try JSONEncoder().encode(checksums)
+
+        let decoded = try DataPackageCodec.decode(
+            fileWrapper: DataPackageCodec.fileWrapper(
+                for: EncodedDataPackage(
+                    files: files,
+                    preferredFilename: "V3.periodicdata"
+                )
+            )
+        )
+
+        #expect(decoded.manifest.formatVersion == 3)
+        #expect(decoded.snapshot.payments.first?.attachmentAssetIDs == [identifier])
+    }
+
+    @MainActor
+    @Test func paymentScreenshotsRoundTripThroughDataExchangeService() async throws {
+        let sourceRoot = FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        let targetRoot = FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        defer {
+            try? FileManager.default.removeItem(at: sourceRoot)
+            try? FileManager.default.removeItem(at: targetRoot)
+        }
+        let firstImageData = try #require(Data(base64Encoded: Self.onePixelPNG))
+        let secondImageData = firstImageData + Data([0])
+
+        let sourceContainer = try makeContainer()
+        let sourceSubscriptionStore = SubscriptionStore(modelContainer: sourceContainer)
+        let input = makeSubscriptionInput()
+        _ = try await sourceSubscriptionStore.create(input)
+        let subscription = try #require(try await sourceSubscriptionStore.fetchAll().first)
+        let sourceAttachmentStore = PaymentAttachmentStore(storageRoot: sourceRoot)
+        let firstWrite = try await sourceAttachmentStore.persistImportedImage(firstImageData)
+        let secondWrite = try await sourceAttachmentStore.persistImportedImage(secondImageData)
+        try await sourceSubscriptionStore.addPayment(
+            SubscriptionPaymentAddInput(
+                payment: SubscriptionPaymentCreateInput(
+                    id: UUID(),
+                    subscriptionID: subscription.id,
+                    periodRecordID: nil,
+                    kind: .manual,
+                    paymentDate: .today,
+                    money: input.money,
+                    periodStart: nil,
+                    periodEnd: nil,
+                    note: "带截图",
+                    attachmentReferences: [secondWrite.reference, firstWrite.reference]
+                ),
+                expectedSubscriptionRevision: subscription.revision
+            )
+        )
+        let sourceService = DataExchangeService(
+            store: DataExchangeStore(modelContainer: sourceContainer),
+            iconCache: AppleIconCache(storageRoot: sourceRoot),
+            paymentAttachmentStore: sourceAttachmentStore
+        )
+        let encoded = try await sourceService.prepareExport()
+        let decoded = try DataPackageCodec.decode(
+            fileWrapper: DataPackageCodec.fileWrapper(for: encoded)
+        )
+        let assetIDs = try #require(decoded.snapshot.payments.first?.attachmentAssetIDs)
+        #expect(assetIDs.count == 2)
+        #expect(decoded.assets[assetIDs[0]] == secondImageData)
+        #expect(decoded.assets[assetIDs[1]] == firstImageData)
+
+        let targetContainer = try makeContainer()
+        let targetExchangeStore = DataExchangeStore(modelContainer: targetContainer)
+        let targetAttachmentStore = PaymentAttachmentStore(storageRoot: targetRoot)
+        let targetService = DataExchangeService(
+            store: targetExchangeStore,
+            iconCache: AppleIconCache(storageRoot: targetRoot),
+            paymentAttachmentStore: targetAttachmentStore
+        )
+        let plan = DataImportPlan(
+            id: UUID(),
+            package: decoded,
+            targetDigest: try await targetExchangeStore.digest(),
+            preview: try await targetExchangeStore.preview(imported: decoded.snapshot),
+            expiresAt: Date().addingTimeInterval(60)
+        )
+        _ = try await targetService.execute(
+            plan: plan,
+            conflictResolution: .useImported,
+            importsSettings: false
+        )
+
+        let importedPayment = try #require(
+            try await SubscriptionStore(modelContainer: targetContainer)
+                .fetchPayments(for: subscription.id)
+                .first
+        )
+        #expect(importedPayment.attachmentReferences.count == 2)
+        #expect(
+            try await targetAttachmentStore.data(
+                for: importedPayment.attachmentReferences[0]
+            ) == secondImageData
+        )
+        #expect(
+            try await targetAttachmentStore.data(
+                for: importedPayment.attachmentReferences[1]
+            ) == firstImageData
+        )
     }
 
     @Test func legacySubscriptionWithoutReminderScheduleUsesImportDefaults() throws {
@@ -60,6 +292,42 @@ struct DataExchangeTests {
         #expect(decoded == value)
     }
 
+    @Test func versionOnePackageWithoutPaymentsRemainsReadable() throws {
+        var snapshot = makeSnapshot()
+        snapshot.payments = []
+        let encoded = try DataPackageCodec.encode(snapshot: snapshot, assets: [:])
+        var files = encoded.files
+        files.removeValue(forKey: "data/payments.jsonl")
+
+        let manifestData = try #require(files["manifest.json"])
+        var manifest = try #require(
+            JSONSerialization.jsonObject(with: manifestData) as? [String: Any]
+        )
+        manifest["formatVersion"] = 1
+        manifest["minimumReaderVersion"] = 1
+        var tables = try #require(manifest["tables"] as? [String: Any])
+        tables.removeValue(forKey: "payments")
+        manifest["tables"] = tables
+        files["manifest.json"] = try JSONSerialization.data(withJSONObject: manifest)
+
+        let checksums = Dictionary(
+            uniqueKeysWithValues: files
+                .filter { $0.key != "checksums.json" }
+                .map { ($0.key, DataPackageCodec.sha256($0.value)) }
+        )
+        files["checksums.json"] = try JSONEncoder().encode(checksums)
+        let legacy = EncodedDataPackage(
+            files: files,
+            preferredFilename: "Legacy.periodicdata"
+        )
+
+        let decoded = try DataPackageCodec.decode(
+            fileWrapper: DataPackageCodec.fileWrapper(for: legacy)
+        )
+        #expect(decoded.manifest.formatVersion == 1)
+        #expect(decoded.snapshot.payments.isEmpty)
+    }
+
     @MainActor
     @Test func legacyReminderDefaultsRemainIdempotentAfterImport() async throws {
         let imported = makeSnapshot(
@@ -85,7 +353,27 @@ struct DataExchangeTests {
     @Test func mergeImportIsAtomicAndBecomesIdempotent() async throws {
         let sourceContainer = try makeContainer()
         let sourceStore = SubscriptionStore(modelContainer: sourceContainer)
-        _ = try await sourceStore.create(makeSubscriptionInput())
+        let subscriptionInput = makeSubscriptionInput()
+        _ = try await sourceStore.create(subscriptionInput)
+        let subscription = try #require(try await sourceStore.fetchAll().first)
+        let period = try #require(try await sourceStore.fetchPeriods(for: subscription.id).first)
+        try await sourceStore.addPayment(
+            SubscriptionPaymentAddInput(
+                payment: SubscriptionPaymentCreateInput(
+                    id: UUID(),
+                    subscriptionID: subscription.id,
+                    periodRecordID: period.id,
+                    kind: .initial,
+                    paymentDate: period.start,
+                    money: Money(minorUnits: 1_499, currency: .usd),
+                    periodStart: period.start,
+                    periodEnd: period.end,
+                    note: "Imported payment",
+                    attachmentReferences: []
+                ),
+                expectedSubscriptionRevision: subscription.revision
+            )
+        )
         let categoryID = UUID()
         let categoryInput = TemplateCategoryInput(
             id: categoryID,
@@ -129,6 +417,7 @@ struct DataExchangeTests {
         let firstPreview = try await exchangeStore.preview(imported: imported)
         #expect(firstPreview.subscriptions.additions == 1)
         #expect(firstPreview.periods.additions == 1)
+        #expect(firstPreview.payments.additions == 1)
         #expect(firstPreview.templates.additions == 1)
         #expect(firstPreview.categories.additions == 1)
         #expect(firstPreview.assignments.additions == 1)
@@ -138,17 +427,19 @@ struct DataExchangeTests {
             expectedDigest: targetDigest,
             conflictResolution: .keepLocal
         )
-        #expect(receipt.added == 5)
+        #expect(receipt.added == 6)
         #expect(receipt.updated == 0)
 
         let secondPreview = try await exchangeStore.preview(imported: imported)
         #expect(secondPreview.subscriptions.unchanged == 1)
         #expect(secondPreview.periods.unchanged == 1)
+        #expect(secondPreview.payments.unchanged == 1)
         #expect(secondPreview.templates.unchanged == 1)
         #expect(secondPreview.categories.unchanged == 1)
         #expect(secondPreview.assignments.unchanged == 1)
         #expect(secondPreview.subscriptions.conflicts == 0)
         #expect(secondPreview.periods.conflicts == 0)
+        #expect(secondPreview.payments.conflicts == 0)
     }
 
     @MainActor
@@ -248,7 +539,8 @@ struct DataExchangeTests {
         )
         let service = DataExchangeService(
             store: store,
-            iconCache: AppleIconCache(storageRoot: storageRoot)
+            iconCache: AppleIconCache(storageRoot: storageRoot),
+            paymentAttachmentStore: PaymentAttachmentStore(storageRoot: storageRoot)
         )
 
         await #expect(throws: DataExchangeError.self) {
@@ -316,6 +608,26 @@ struct DataExchangeTests {
                     createdAt: timestamp
                 )
             ],
+            payments: [
+                DataPackagePayment(
+                    recordVersion: 1,
+                    id: UUID(),
+                    subscriptionID: subscriptionID,
+                    periodRecordID: periodID,
+                    kind: .initial,
+                    paymentDate: LocalDate(dayNumber: 20_000),
+                    amountMinor: 1_499,
+                    currency: .usd,
+                    currencyScale: 2,
+                    periodStart: LocalDate(dayNumber: 20_000),
+                    periodEnd: LocalDate(dayNumber: 20_029),
+                    note: "优惠支付",
+                    attachmentAssetIDs: [],
+                    revision: 1,
+                    createdAt: timestamp,
+                    updatedAt: timestamp
+                )
+            ],
             templates: [],
             categories: [],
             builtinCategoryAssignments: [],
@@ -329,6 +641,9 @@ struct DataExchangeTests {
             schema: Schema([
                 SubscriptionRecord.self,
                 SubscriptionPeriodRecord.self,
+                SubscriptionPaymentRecord.self,
+                SubscriptionPaymentAttachmentRecord.self,
+                SubscriptionPaymentAttachmentItemRecord.self,
                 ServiceTemplateRecord.self,
                 TemplateCategoryRecord.self,
                 BuiltinTemplateCategoryAssignmentRecord.self,

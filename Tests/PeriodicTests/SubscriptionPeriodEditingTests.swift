@@ -38,7 +38,13 @@ struct SubscriptionPeriodEditingTests {
     @Test func manuallyAddingHistoryKeepsCurrentSubscriptionValuesUnchanged() async throws {
         let controller = PersistenceController()
         let container = try controller.makeContainer(
-            schema: Schema([SubscriptionRecord.self, SubscriptionPeriodRecord.self]),
+            schema: Schema([
+                SubscriptionRecord.self,
+                SubscriptionPeriodRecord.self,
+                SubscriptionPaymentRecord.self,
+                SubscriptionPaymentAttachmentRecord.self,
+                SubscriptionPaymentAttachmentItemRecord.self,
+            ]),
             inMemory: true
         )
         let store = SubscriptionStore(modelContainer: container)
@@ -121,7 +127,13 @@ struct SubscriptionPeriodEditingTests {
     @Test func editingHistoryKeepsCurrentSubscriptionValuesUnchanged() async throws {
         let controller = PersistenceController()
         let container = try controller.makeContainer(
-            schema: Schema([SubscriptionRecord.self, SubscriptionPeriodRecord.self]),
+            schema: Schema([
+                SubscriptionRecord.self,
+                SubscriptionPeriodRecord.self,
+                SubscriptionPaymentRecord.self,
+                SubscriptionPaymentAttachmentRecord.self,
+                SubscriptionPaymentAttachmentItemRecord.self,
+            ]),
             inMemory: true
         )
         let store = SubscriptionStore(modelContainer: container)
@@ -187,7 +199,13 @@ struct SubscriptionPeriodEditingTests {
     @Test func deletingHistoryKeepsCurrentSubscriptionValuesUnchanged() async throws {
         let controller = PersistenceController()
         let container = try controller.makeContainer(
-            schema: Schema([SubscriptionRecord.self, SubscriptionPeriodRecord.self]),
+            schema: Schema([
+                SubscriptionRecord.self,
+                SubscriptionPeriodRecord.self,
+                SubscriptionPaymentRecord.self,
+                SubscriptionPaymentAttachmentRecord.self,
+                SubscriptionPaymentAttachmentItemRecord.self,
+            ]),
             inMemory: true
         )
         let store = SubscriptionStore(modelContainer: container)

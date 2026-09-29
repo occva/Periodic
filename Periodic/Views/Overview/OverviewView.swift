@@ -53,7 +53,7 @@ struct OverviewView: View {
             Button("取消", role: .cancel) {}
         } message: { preview in
             Text(
-                "将删除 \(preview.subscriptionCount) 条订阅和 \(preview.periodCount) 条周期记录。此操作无法撤销。"
+                "将删除 \(preview.subscriptionCount) 条订阅、\(preview.periodCount) 条周期记录和 \(preview.paymentCount) 条消费记录。此操作无法撤销。"
             )
         }
         .accessibilityIdentifier("overview-page")
@@ -454,7 +454,8 @@ struct OverviewView: View {
                 selection.subtract(preview.targets.map(\.id))
                 deletionPreview = nil
                 await session.reload(using: services)
-                if outcome.pendingIconCleanupCount > 0 {
+                if outcome.pendingIconCleanupCount > 0
+                    || outcome.pendingPaymentAttachmentCleanupCount > 0 {
                     self.error = PresentedError(
                         SubscriptionDeletionNotice.iconCleanupPending,
                         title: "订阅已删除"
@@ -556,7 +557,7 @@ private enum SubscriptionDeletionNotice: LocalizedError {
     case iconCleanupPending
 
     var errorDescription: String? {
-        "订阅数据已删除，但部分本地图标暂时无法清理；应用下次启动时会自动重试。"
+        "订阅数据已删除，但部分本地图片暂时无法清理；应用下次启动时会自动重试。"
     }
 }
 

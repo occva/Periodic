@@ -101,11 +101,11 @@ struct ContentView: View {
                             session.presentEditor(for: subscription.id)
                         }
                     },
-                    loadPeriods: { id in
+                    loadDetail: { id in
                         guard let store = services.subscriptionStore else {
                             throw ContentViewError.storeUnavailable
                         }
-                        return try await store.fetchPeriods(for: id)
+                        return try await store.fetchDetail(for: id)
                     },
                     addPeriod: { input in
                         guard let store = services.subscriptionStore else {
@@ -129,6 +129,18 @@ struct ContentView: View {
                         }
                         try await store.deletePeriod(input)
                         services.notifySubscriptionDataChanged()
+                        await session.reload(using: services)
+                    },
+                    addPayment: { input in
+                        try await services.addPayment(input)
+                        await session.reload(using: services)
+                    },
+                    updatePayment: { input in
+                        try await services.updatePayment(input)
+                        await session.reload(using: services)
+                    },
+                    deletePayment: { input in
+                        try await services.deletePayment(input)
                         await session.reload(using: services)
                     },
                     confirmAutomaticRenewal: { request in

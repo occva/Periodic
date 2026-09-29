@@ -2,7 +2,7 @@ import Foundation
 
 struct DataPackageManifest: Codable, Equatable, Sendable {
     static let currentFormat = "periodic-data-package"
-    static let currentVersion = 1
+    static let currentVersion = 4
 
     let format: String
     let formatVersion: Int
@@ -20,28 +20,229 @@ struct DataPackageManifest: Codable, Equatable, Sendable {
     struct TableCounts: Codable, Equatable, Sendable {
         let subscriptions: Int
         let periods: Int
+        let payments: Int?
         let templates: Int
         let categories: Int
         let builtinCategoryAssignments: Int
+
+        init(
+            subscriptions: Int,
+            periods: Int,
+            payments: Int? = nil,
+            templates: Int,
+            categories: Int,
+            builtinCategoryAssignments: Int
+        ) {
+            self.subscriptions = subscriptions
+            self.periods = periods
+            self.payments = payments
+            self.templates = templates
+            self.categories = categories
+            self.builtinCategoryAssignments = builtinCategoryAssignments
+        }
     }
 }
 
 struct DataPackageSnapshot: Codable, Equatable, Sendable {
     var subscriptions: [DataPackageSubscription]
     var periods: [DataPackagePeriod]
+    var payments: [DataPackagePayment]
     var templates: [DataPackageTemplate]
     var categories: [DataPackageCategory]
     var builtinCategoryAssignments: [DataPackageBuiltinCategoryAssignment]
     var settings: DataPackageSettings?
 
+    init(
+        subscriptions: [DataPackageSubscription],
+        periods: [DataPackagePeriod],
+        payments: [DataPackagePayment] = [],
+        templates: [DataPackageTemplate],
+        categories: [DataPackageCategory],
+        builtinCategoryAssignments: [DataPackageBuiltinCategoryAssignment],
+        settings: DataPackageSettings?
+    ) {
+        self.subscriptions = subscriptions
+        self.periods = periods
+        self.payments = payments
+        self.templates = templates
+        self.categories = categories
+        self.builtinCategoryAssignments = builtinCategoryAssignments
+        self.settings = settings
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case subscriptions
+        case periods
+        case payments
+        case templates
+        case categories
+        case builtinCategoryAssignments
+        case settings
+    }
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        subscriptions = try container.decode([DataPackageSubscription].self, forKey: .subscriptions)
+        periods = try container.decode([DataPackagePeriod].self, forKey: .periods)
+        payments = try container.decodeIfPresent([DataPackagePayment].self, forKey: .payments) ?? []
+        templates = try container.decode([DataPackageTemplate].self, forKey: .templates)
+        categories = try container.decode([DataPackageCategory].self, forKey: .categories)
+        builtinCategoryAssignments = try container.decode(
+            [DataPackageBuiltinCategoryAssignment].self,
+            forKey: .builtinCategoryAssignments
+        )
+        settings = try container.decodeIfPresent(DataPackageSettings.self, forKey: .settings)
+    }
+
     static let empty = DataPackageSnapshot(
         subscriptions: [],
         periods: [],
+        payments: [],
         templates: [],
         categories: [],
         builtinCategoryAssignments: [],
         settings: nil
     )
+}
+
+struct DataPackagePayment: Codable, Equatable, Sendable, Identifiable {
+    let recordVersion: Int
+    let id: UUID
+    let subscriptionID: UUID
+    let periodRecordID: UUID?
+    let kind: SubscriptionPaymentKind
+    let paymentDate: LocalDate
+    let amountMinor: Int64
+    let currency: CurrencyCode
+    let currencyScale: Int
+    let periodStart: LocalDate?
+    let periodEnd: LocalDate?
+    let note: String
+    var attachmentAssetIDs: [String]
+    let revision: Int64
+    let createdAt: Date
+    let updatedAt: Date
+
+    init(
+        recordVersion: Int,
+        id: UUID,
+        subscriptionID: UUID,
+        periodRecordID: UUID?,
+        kind: SubscriptionPaymentKind,
+        paymentDate: LocalDate,
+        amountMinor: Int64,
+        currency: CurrencyCode,
+        currencyScale: Int,
+        periodStart: LocalDate?,
+        periodEnd: LocalDate?,
+        note: String,
+        attachmentAssetIDs: [String],
+        revision: Int64,
+        createdAt: Date,
+        updatedAt: Date
+    ) {
+        self.recordVersion = recordVersion
+        self.id = id
+        self.subscriptionID = subscriptionID
+        self.periodRecordID = periodRecordID
+        self.kind = kind
+        self.paymentDate = paymentDate
+        self.amountMinor = amountMinor
+        self.currency = currency
+        self.currencyScale = currencyScale
+        self.periodStart = periodStart
+        self.periodEnd = periodEnd
+        self.note = note
+        self.attachmentAssetIDs = attachmentAssetIDs
+        self.revision = revision
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case recordVersion
+        case id
+        case subscriptionID
+        case periodRecordID
+        case kind
+        case paymentDate
+        case amountMinor
+        case currency
+        case currencyScale
+        case periodStart
+        case periodEnd
+        case note
+        case attachmentAssetIDs
+        case attachmentAssetID
+        case revision
+        case createdAt
+        case updatedAt
+    }
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        recordVersion = try container.decode(Int.self, forKey: .recordVersion)
+        id = try container.decode(UUID.self, forKey: .id)
+        subscriptionID = try container.decode(UUID.self, forKey: .subscriptionID)
+        periodRecordID = try container.decodeIfPresent(UUID.self, forKey: .periodRecordID)
+        kind = try container.decode(SubscriptionPaymentKind.self, forKey: .kind)
+        paymentDate = try container.decode(LocalDate.self, forKey: .paymentDate)
+        amountMinor = try container.decode(Int64.self, forKey: .amountMinor)
+        currency = try container.decode(CurrencyCode.self, forKey: .currency)
+        currencyScale = try container.decode(Int.self, forKey: .currencyScale)
+        periodStart = try container.decodeIfPresent(LocalDate.self, forKey: .periodStart)
+        periodEnd = try container.decodeIfPresent(LocalDate.self, forKey: .periodEnd)
+        note = try container.decode(String.self, forKey: .note)
+        if let values = try container.decodeIfPresent(
+            [String].self,
+            forKey: .attachmentAssetIDs
+        ) {
+            attachmentAssetIDs = values
+        } else {
+            attachmentAssetIDs = try container.decodeIfPresent(
+                String.self,
+                forKey: .attachmentAssetID
+            ).map { [$0] } ?? []
+        }
+        revision = try container.decode(Int64.self, forKey: .revision)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(recordVersion, forKey: .recordVersion)
+        try container.encode(id, forKey: .id)
+        try container.encode(subscriptionID, forKey: .subscriptionID)
+        try container.encodeIfPresent(periodRecordID, forKey: .periodRecordID)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(paymentDate, forKey: .paymentDate)
+        try container.encode(amountMinor, forKey: .amountMinor)
+        try container.encode(currency, forKey: .currency)
+        try container.encode(currencyScale, forKey: .currencyScale)
+        try container.encodeIfPresent(periodStart, forKey: .periodStart)
+        try container.encodeIfPresent(periodEnd, forKey: .periodEnd)
+        try container.encode(note, forKey: .note)
+        try container.encode(attachmentAssetIDs, forKey: .attachmentAssetIDs)
+        try container.encode(revision, forKey: .revision)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(updatedAt, forKey: .updatedAt)
+    }
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.id == rhs.id
+            && lhs.subscriptionID == rhs.subscriptionID
+            && lhs.periodRecordID == rhs.periodRecordID
+            && lhs.kind == rhs.kind
+            && lhs.paymentDate == rhs.paymentDate
+            && lhs.amountMinor == rhs.amountMinor
+            && lhs.currency == rhs.currency
+            && lhs.currencyScale == rhs.currencyScale
+            && lhs.periodStart == rhs.periodStart
+            && lhs.periodEnd == rhs.periodEnd
+            && lhs.note == rhs.note
+            && lhs.attachmentAssetIDs == rhs.attachmentAssetIDs
+    }
 }
 
 struct DataPackageSubscription: Codable, Equatable, Sendable, Identifiable {
@@ -244,6 +445,7 @@ struct DecodedDataPackage: Sendable {
 struct DataExportPreview: Equatable, Sendable {
     let subscriptions: Int
     let periods: Int
+    let payments: Int
     let templates: Int
     let categories: Int
     let assignments: Int
@@ -252,6 +454,7 @@ struct DataExportPreview: Equatable, Sendable {
 struct DataImportPreview: Equatable, Sendable {
     let subscriptions: EntityChanges
     let periods: EntityChanges
+    let payments: EntityChanges
     let templates: EntityChanges
     let categories: EntityChanges
     let assignments: EntityChanges
@@ -264,12 +467,12 @@ struct DataImportPreview: Equatable, Sendable {
     }
 
     var totalAdditions: Int {
-        subscriptions.additions + periods.additions + templates.additions
+        subscriptions.additions + periods.additions + payments.additions + templates.additions
             + categories.additions + assignments.additions
     }
 
     var totalConflicts: Int {
-        subscriptions.conflicts + periods.conflicts + templates.conflicts
+        subscriptions.conflicts + periods.conflicts + payments.conflicts + templates.conflicts
             + categories.conflicts + assignments.conflicts
     }
 }

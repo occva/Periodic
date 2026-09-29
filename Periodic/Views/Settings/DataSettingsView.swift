@@ -10,7 +10,7 @@ struct DataSettingsView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Label("备份与迁移", systemImage: "externaldrive")
                         .font(.headline)
-                    Text("完整备份包含订阅与周期历史、用户模板、分类、设置和本地图标。导入前会先显示新增、冲突和跳过数量。")
+                    Text("完整备份包含订阅、周期与消费历史、消费截图、用户模板、分类、设置和本地图片。导入前会先显示新增、冲突和跳过数量。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

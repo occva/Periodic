@@ -12,6 +12,8 @@ struct SubscriptionRenewalEditorView: View {
     @State private var cycle: BillingCycle
     @State private var amountText: String
     @State private var currency: CurrencyCode
+    @State private var paymentDate = Date()
+    @State private var note = ""
     @State private var isSaving = false
     @State private var error: PresentedError?
 
@@ -42,7 +44,19 @@ struct SubscriptionRenewalEditorView: View {
                     }
                 }
 
-                LabeledContent("续费金额") {
+                LabeledContent("本期价格") {
+                    Text(quotedMoney.displayText(style: currencyDisplayStyle))
+                        .monospacedDigit()
+                }
+
+                DatePicker(
+                    "付款日期",
+                    selection: $paymentDate,
+                    in: ...Date(),
+                    displayedComponents: .date
+                )
+
+                LabeledContent("实际支付") {
                     HStack(spacing: 8) {
                         TextField("金额", text: $amountText)
                             .frame(width: 120)
@@ -63,13 +77,16 @@ struct SubscriptionRenewalEditorView: View {
                     }
                 }
 
+                TextField("备注", text: $note, axis: .vertical)
+                    .lineLimit(2...4)
+
                 LabeledContent("新周期") {
                     Text(periodDescription)
                         .monospacedDigit()
                 }
 
                 LabeledContent("记录") {
-                    Text("保存为续费周期，并同步更新当前周期与报价")
+                    Text("同时保存续费周期和消费动态；不会修改以后续费使用的当前报价")
                         .foregroundStyle(.secondary)
                 }
             }
@@ -89,14 +106,6 @@ struct SubscriptionRenewalEditorView: View {
         .padding(20)
         .frame(width: 500)
         .presentationSizing(.fitted)
-        .onChange(of: cycle) { _, newCycle in
-            guard let amount = preview.money.prorated(
-                from: preview.cycleMonths,
-                to: newCycle.rawValue
-            ) else { return }
-            amountText = amount.inputText
-            currency = amount.currency
-        }
         .errorAlert($error)
     }
 
@@ -109,6 +118,13 @@ struct SubscriptionRenewalEditorView: View {
         return "\(preview.nextStart.displayText) 至 \(expiry.displayText)"
     }
 
+    private var quotedMoney: Money {
+        preview.money.prorated(
+            from: preview.cycleMonths,
+            to: cycle.rawValue
+        ) ?? preview.money
+    }
+
     private func save() {
         do {
             let money = try Money.parse(amountText, currency: currency)
@@ -117,7 +133,10 @@ struct SubscriptionRenewalEditorView: View {
                 expectedRevision: preview.expectedRevision,
                 expectedExpiry: preview.previousExpiry,
                 cycleMonths: cycle.rawValue,
-                money: money
+                quotedMoney: quotedMoney,
+                paymentDate: LocalDate(paymentDate),
+                paymentMoney: money,
+                paymentNote: note.trimmingCharacters(in: .whitespacesAndNewlines)
             )
             isSaving = true
             Task { @MainActor in

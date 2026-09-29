@@ -197,12 +197,12 @@ struct SubscriptionMaintenanceTests {
     }
 
     @Test func appSchemaHasExplicitVersionsAndMigration() {
-        let schema = Schema(versionedSchema: AppSchemaV2.self)
+        let schema = Schema(versionedSchema: AppSchemaV5.self)
 
-        #expect(schema.version == Schema.Version(2, 0, 0))
-        #expect(schema.entities.count == AppSchemaV2.models.count)
-        #expect(AppSchemaMigrationPlan.schemas.count == 2)
-        #expect(AppSchemaMigrationPlan.stages.count == 1)
+        #expect(schema.version == Schema.Version(5, 0, 0))
+        #expect(schema.entities.count == AppSchemaV5.models.count)
+        #expect(AppSchemaMigrationPlan.schemas.count == 5)
+        #expect(AppSchemaMigrationPlan.stages.count == 4)
     }
 
     @MainActor
@@ -229,7 +229,7 @@ struct SubscriptionMaintenanceTests {
             try context.save()
         }
 
-        let versionedSchema = Schema(versionedSchema: AppSchemaV2.self)
+        let versionedSchema = Schema(versionedSchema: AppSchemaV5.self)
         let reopenedContainer = try PersistenceController(storeURL: storeURL).makeContainer(
             schema: versionedSchema,
             migrationPlan: AppSchemaMigrationPlan.self
@@ -241,6 +241,126 @@ struct SubscriptionMaintenanceTests {
         #expect(records.map(\.id) == [input.id])
         #expect(records.first?.reminderAdvanceDaysRaw == "1")
         #expect(records.first?.reminderMinuteOfDay == 9 * 60)
+    }
+
+    @MainActor
+    @Test func versionThreePaymentMigratesWithNoScreenshotAttachment() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        let storeURL = directory.appending(path: "Periodic.store")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let subscriptionInput = try makeInput(name: "V3 Payment")
+        let paymentID = UUID()
+
+        do {
+            let container = try PersistenceController(storeURL: storeURL).makeContainer(
+                schema: Schema(versionedSchema: AppSchemaV3.self)
+            )
+            let context = ModelContext(container)
+            context.insert(SubscriptionRecord(input: subscriptionInput))
+            context.insert(
+                SubscriptionPaymentRecord(
+                    input: SubscriptionPaymentCreateInput(
+                        id: paymentID,
+                        subscriptionID: subscriptionInput.id,
+                        periodRecordID: nil,
+                        kind: .manual,
+                        paymentDate: .today,
+                        money: subscriptionInput.money,
+                        periodStart: nil,
+                        periodEnd: nil,
+                        note: "V3",
+                        attachmentReferences: []
+                    )
+                )
+            )
+            try context.save()
+        }
+
+        let container = try PersistenceController(storeURL: storeURL).makeContainer(
+            schema: Schema(versionedSchema: AppSchemaV5.self),
+            migrationPlan: AppSchemaMigrationPlan.self
+        )
+        let context = ModelContext(container)
+        #expect(
+            try context.fetch(FetchDescriptor<SubscriptionPaymentRecord>()).map(\.id)
+                == [paymentID]
+        )
+        #expect(
+            try context.fetch(FetchDescriptor<SubscriptionPaymentAttachmentRecord>())
+                .isEmpty
+        )
+        #expect(
+            try context.fetch(FetchDescriptor<SubscriptionPaymentAttachmentItemRecord>())
+                .isEmpty
+        )
+    }
+
+    @MainActor
+    @Test func versionFourSingleScreenshotMigratesToOrderedAttachmentItem() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        let storeURL = directory.appending(path: "Periodic.store")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let subscriptionInput = try makeInput(name: "V4 Screenshot")
+        let paymentID = UUID()
+        let reference = PaymentAttachmentReference.make(
+            contentHash: String(repeating: "a", count: 64)
+        )
+
+        do {
+            let container = try PersistenceController(storeURL: storeURL).makeContainer(
+                schema: Schema(versionedSchema: AppSchemaV4.self)
+            )
+            let context = ModelContext(container)
+            context.insert(SubscriptionRecord(input: subscriptionInput))
+            context.insert(
+                SubscriptionPaymentRecord(
+                    input: SubscriptionPaymentCreateInput(
+                        id: paymentID,
+                        subscriptionID: subscriptionInput.id,
+                        periodRecordID: nil,
+                        kind: .manual,
+                        paymentDate: .today,
+                        money: subscriptionInput.money,
+                        periodStart: nil,
+                        periodEnd: nil,
+                        note: "V4",
+                        attachmentReferences: []
+                    )
+                )
+            )
+            context.insert(
+                SubscriptionPaymentAttachmentRecord(
+                    paymentID: paymentID,
+                    reference: reference
+                )
+            )
+            try context.save()
+        }
+
+        let container = try PersistenceController(storeURL: storeURL).makeContainer(
+            schema: Schema(versionedSchema: AppSchemaV5.self),
+            migrationPlan: AppSchemaMigrationPlan.self
+        )
+        let context = ModelContext(container)
+        let migratedItems = try context.fetch(
+            FetchDescriptor<SubscriptionPaymentAttachmentItemRecord>()
+        )
+
+        #expect(
+            try context.fetch(FetchDescriptor<SubscriptionPaymentAttachmentRecord>())
+                .isEmpty
+        )
+        #expect(migratedItems.map(\.paymentID) == [paymentID])
+        #expect(migratedItems.map(\.reference) == [reference])
+        #expect(migratedItems.map(\.sortOrder) == [0])
+        #expect(
+            try await SubscriptionStore(modelContainer: container)
+                .fetchPayments(for: subscriptionInput.id)
+                .first?
+                .attachmentReferences == [reference]
+        )
     }
 
     @MainActor
@@ -344,10 +464,12 @@ struct SubscriptionMaintenanceTests {
         ])
         #expect(preview.subscriptionCount == 2)
         #expect(preview.periodCount == 2)
+        #expect(preview.paymentCount == 0)
 
         let result = try await store.delete(preview)
         #expect(result.deletedSubscriptionCount == 2)
         #expect(result.deletedPeriodCount == 2)
+        #expect(result.deletedPaymentCount == 0)
         #expect(try await store.fetchAll().isEmpty)
     }
 
@@ -494,6 +616,9 @@ struct SubscriptionMaintenanceTests {
             schema: Schema([
                 SubscriptionRecord.self,
                 SubscriptionPeriodRecord.self,
+                SubscriptionPaymentRecord.self,
+                SubscriptionPaymentAttachmentRecord.self,
+                SubscriptionPaymentAttachmentItemRecord.self,
                 ServiceTemplateRecord.self,
             ]),
             inMemory: true

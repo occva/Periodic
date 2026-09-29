@@ -10,16 +10,17 @@ struct DataExportPreviewView: View {
         VStack(alignment: .leading, spacing: 20) {
             Label("完整备份", systemImage: "externaldrive.badge.timemachine")
                 .font(.title2.weight(.semibold))
-            Text("将创建一个 .periodicdata 数据包，包含当前全部订阅历史、用户模板、分类、设置和本地图标。")
+            Text("将创建一个 .periodicdata 数据包，包含当前全部订阅历史、消费截图、用户模板、分类、设置和本地图片。")
                 .foregroundStyle(.secondary)
             Grid(alignment: .leading, horizontalSpacing: 24, verticalSpacing: 10) {
                 summaryRow("订阅", value: preview.subscriptions)
                 summaryRow("周期历史", value: preview.periods)
+                summaryRow("消费记录", value: preview.payments)
                 summaryRow("用户模板", value: preview.templates)
                 summaryRow("自定义分类", value: preview.categories)
                 summaryRow("分类覆盖", value: preview.assignments)
             }
-            Text("备份未加密，可能包含订阅名称、金额、日期和备注，请妥善保管。")
+            Text("备份未加密，可能包含订阅名称、金额、日期、备注和消费截图，请妥善保管。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             HStack {
@@ -80,7 +81,7 @@ struct DataImportPreviewView: View {
             }
             if plan.preview.assetCount > 0 {
                 Text(String(
-                    format: AppLocalization.string("同时验证并导入 %d 个本地图标。"),
+                    format: AppLocalization.string("同时验证并导入 %d 张本地图片。"),
                     plan.preview.assetCount
                 ))
                     .font(.caption)
@@ -105,6 +106,7 @@ struct DataImportPreviewView: View {
         [
             .init(name: AppLocalization.string("订阅"), changes: plan.preview.subscriptions),
             .init(name: AppLocalization.string("周期历史"), changes: plan.preview.periods),
+            .init(name: AppLocalization.string("消费记录"), changes: plan.preview.payments),
             .init(name: AppLocalization.string("用户模板"), changes: plan.preview.templates),
             .init(name: AppLocalization.string("自定义分类"), changes: plan.preview.categories),
             .init(name: AppLocalization.string("分类覆盖"), changes: plan.preview.assignments),

@@ -17,6 +17,8 @@ enum PreferenceKey {
     static let submittedNotificationRequests = "submittedNotificationRequests"
     static let submittedSampleNotificationRequests = "submittedSampleNotificationRequests"
     static let pendingIconCleanupReferences = "pendingIconCleanupReferences"
+    static let pendingPaymentAttachmentCleanupReferences =
+        "pendingPaymentAttachmentCleanupReferences"
     static let completedLifetimePeriodBackfill = "completedLifetimePeriodBackfill"
 
     static func lifetimePeriodBackfillCompleted(datasetID: UUID) -> String {

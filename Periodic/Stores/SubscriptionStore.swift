@@ -7,7 +7,11 @@ actor SubscriptionStore {
         case invalidStoredValue(String)
         case notFound
         case periodNotFound
+        case paymentNotFound
         case incompletePeriodDates
+        case invalidPaymentDate
+        case invalidPaymentAmount
+        case invalidPaymentPeriod
         case revisionConflict
 
         var errorDescription: String? {
@@ -15,7 +19,11 @@ actor SubscriptionStore {
             case .invalidStoredValue(let field): "订阅数据的 \(field) 字段无法识别。"
             case .notFound: "这条订阅已不存在。"
             case .periodNotFound: "这条周期记录已不存在。"
+            case .paymentNotFound: "这条消费记录已不存在。"
             case .incompletePeriodDates: "开始日期和到期日期必须同时填写，才能添加周期记录。"
+            case .invalidPaymentDate: "付款日期不能晚于今天。"
+            case .invalidPaymentAmount: "付款金额不能为负数。"
+            case .invalidPaymentPeriod: "消费记录关联的周期或覆盖日期无效。"
             case .revisionConflict: "这条订阅已在别处修改，请刷新后重试。"
             }
         }
@@ -102,6 +110,64 @@ actor SubscriptionStore {
         return periods
     }
 
+    func fetchPayments(for subscriptionID: UUID) throws -> [SubscriptionPaymentDTO] {
+        let descriptor = FetchDescriptor<SubscriptionPaymentRecord>(
+            predicate: #Predicate { $0.subscriptionID == subscriptionID },
+            sortBy: [
+                SortDescriptor(\.paymentDay, order: .reverse),
+                SortDescriptor(\.createdAt, order: .reverse),
+            ]
+        )
+        let records = try modelContext.fetch(descriptor)
+        let attachmentReferences = try paymentAttachmentReferencesByPaymentID(
+            paymentIDs: Set(records.map(\.id))
+        )
+        var payments: [SubscriptionPaymentDTO] = []
+        var firstConversionError: (any Error)?
+        for record in records {
+            do {
+                payments.append(try makePaymentDTO(
+                    record,
+                    attachmentReferences: attachmentReferences[record.id] ?? []
+                ))
+            } catch {
+                firstConversionError = firstConversionError ?? error
+            }
+        }
+        if payments.isEmpty, !records.isEmpty, let firstConversionError {
+            throw firstConversionError
+        }
+        if firstConversionError != nil {
+            AppLog.persistence.warning("Skipped invalid subscription payment records while loading")
+        }
+        return payments
+    }
+
+    func fetchDetail(for subscriptionID: UUID) throws -> SubscriptionDetailSnapshot {
+        var descriptor = FetchDescriptor<SubscriptionRecord>(
+            predicate: #Predicate { $0.id == subscriptionID }
+        )
+        descriptor.fetchLimit = 1
+        guard let record = try modelContext.fetch(descriptor).first else {
+            throw StoreError.notFound
+        }
+        return try SubscriptionDetailSnapshot(
+            subscription: makeDTO(record),
+            periods: fetchPeriods(for: subscriptionID),
+            payments: fetchPayments(for: subscriptionID)
+        )
+    }
+
+    func referencedPaymentAttachmentReferences() throws -> Set<String> {
+        let current = try modelContext.fetch(
+            FetchDescriptor<SubscriptionPaymentAttachmentItemRecord>()
+        ).map(\.reference)
+        let legacy = try modelContext.fetch(
+            FetchDescriptor<SubscriptionPaymentAttachmentRecord>()
+        ).map(\.reference)
+        return Set(current).union(legacy)
+    }
+
     func update(
         _ input: SubscriptionCreateInput,
         expectedRevision: Int64,
@@ -157,7 +223,79 @@ actor SubscriptionStore {
                 expectedRevision: input.expectedSubscriptionRevision
             )
             let period = try period(matching: input.original)
+            let periodID = period.id
+            let linkedPayments = try modelContext.fetch(
+                FetchDescriptor<SubscriptionPaymentRecord>(
+                    predicate: #Predicate { $0.periodRecordID == periodID }
+                )
+            )
+            for payment in linkedPayments {
+                payment.periodRecordID = nil
+                payment.revision += 1
+                payment.updatedAt = .now
+            }
             modelContext.delete(period)
+            subscription.markHistoryChanged()
+        }
+    }
+
+    func addPayment(_ input: SubscriptionPaymentAddInput) throws {
+        try commit {
+            let subscription = try fetchSubscription(
+                id: input.payment.subscriptionID,
+                expectedRevision: input.expectedSubscriptionRevision
+            )
+            try validate(input.payment)
+            try validatePeriodLink(
+                input.payment.periodRecordID,
+                subscriptionID: input.payment.subscriptionID
+            )
+            modelContext.insert(SubscriptionPaymentRecord(input: input.payment))
+            try replacePaymentAttachments(
+                paymentID: input.payment.id,
+                references: input.payment.attachmentReferences
+            )
+            subscription.markHistoryChanged()
+        }
+    }
+
+    func updatePayment(_ input: SubscriptionPaymentUpdateInput) throws {
+        try commit {
+            let subscription = try fetchSubscription(
+                id: input.original.subscriptionID,
+                expectedRevision: input.expectedSubscriptionRevision
+            )
+            try validate(
+                kind: input.original.kind,
+                paymentDate: input.paymentDate,
+                money: input.money,
+                periodStart: input.periodStart,
+                periodEnd: input.periodEnd
+            )
+            try validatePeriodLink(
+                input.periodRecordID,
+                subscriptionID: input.original.subscriptionID
+            )
+            let payment = try payment(matching: input.original)
+            payment.apply(input)
+            try replacePaymentAttachments(
+                paymentID: payment.id,
+                references: input.attachmentReferences
+            )
+            subscription.markHistoryChanged()
+        }
+    }
+
+    func deletePayment(_ input: SubscriptionPaymentDeleteInput) throws {
+        try commit {
+            let subscription = try fetchSubscription(
+                id: input.original.subscriptionID,
+                expectedRevision: input.expectedSubscriptionRevision
+            )
+            let payment = try payment(matching: input.original)
+            try paymentAttachments(paymentID: payment.id).forEach(modelContext.delete)
+            try legacyPaymentAttachments(paymentID: payment.id).forEach(modelContext.delete)
+            modelContext.delete(payment)
             subscription.markHistoryChanged()
         }
     }
@@ -167,7 +305,12 @@ actor SubscriptionStore {
             .values
             .sorted { $0.id.uuidString < $1.id.uuidString }
         guard !uniqueTargets.isEmpty else {
-            return SubscriptionDeletionPreview(targets: [], subscriptionCount: 0, periodCount: 0)
+            return SubscriptionDeletionPreview(
+                targets: [],
+                subscriptionCount: 0,
+                periodCount: 0,
+                paymentCount: 0
+            )
         }
         let records = try modelContext.fetch(FetchDescriptor<SubscriptionRecord>())
         let recordsByID = Dictionary(uniqueKeysWithValues: records.map { ($0.id, $0) })
@@ -180,10 +323,13 @@ actor SubscriptionStore {
         let targetIDs = Set(uniqueTargets.map(\.id))
         let periodCount = try modelContext.fetch(FetchDescriptor<SubscriptionPeriodRecord>())
             .count { targetIDs.contains($0.subscriptionID) }
+        let paymentCount = try modelContext.fetch(FetchDescriptor<SubscriptionPaymentRecord>())
+            .count { targetIDs.contains($0.subscriptionID) }
         return SubscriptionDeletionPreview(
             targets: uniqueTargets,
             subscriptionCount: uniqueTargets.count,
-            periodCount: periodCount
+            periodCount: periodCount,
+            paymentCount: paymentCount
         )
     }
 
@@ -202,12 +348,28 @@ actor SubscriptionStore {
             }
             let periods = try modelContext.fetch(FetchDescriptor<SubscriptionPeriodRecord>())
                 .filter { targetIDs.contains($0.subscriptionID) }
+            let payments = try modelContext.fetch(FetchDescriptor<SubscriptionPaymentRecord>())
+                .filter { targetIDs.contains($0.subscriptionID) }
+            let paymentIDs = Set(payments.map(\.id))
+            let paymentAttachments = try modelContext.fetch(
+                FetchDescriptor<SubscriptionPaymentAttachmentItemRecord>()
+            ).filter { paymentIDs.contains($0.paymentID) }
+            let legacyPaymentAttachments = try modelContext.fetch(
+                FetchDescriptor<SubscriptionPaymentAttachmentRecord>()
+            ).filter { paymentIDs.contains($0.paymentID) }
             guard targets.count == preview.subscriptionCount,
-                  periods.count == preview.periodCount else {
+                  periods.count == preview.periodCount,
+                  payments.count == preview.paymentCount else {
                 throw StoreError.revisionConflict
             }
 
             let candidateIconReferences = Set(targets.compactMap(\.iconURLString))
+            let candidateAttachmentReferences = Set(
+                paymentAttachments.map(\.reference)
+            ).union(legacyPaymentAttachments.map(\.reference))
+            for attachment in paymentAttachments { modelContext.delete(attachment) }
+            for attachment in legacyPaymentAttachments { modelContext.delete(attachment) }
+            for payment in payments { modelContext.delete(payment) }
             for period in periods { modelContext.delete(period) }
             for target in targets { modelContext.delete(target) }
 
@@ -220,12 +382,28 @@ actor SubscriptionStore {
                 try modelContext.fetch(FetchDescriptor<ServiceTemplateRecord>())
                     .compactMap(\.iconURLString)
             )
+            let remainingAttachmentReferences = Set(
+                try modelContext.fetch(
+                    FetchDescriptor<SubscriptionPaymentAttachmentItemRecord>()
+                )
+                    .filter { !paymentIDs.contains($0.paymentID) }
+                    .map(\.reference)
+            ).union(
+                try modelContext.fetch(
+                    FetchDescriptor<SubscriptionPaymentAttachmentRecord>()
+                )
+                    .filter { !paymentIDs.contains($0.paymentID) }
+                    .map(\.reference)
+            )
             return SubscriptionDeletionResult(
                 deletedSubscriptionCount: targets.count,
                 deletedPeriodCount: periods.count,
+                deletedPaymentCount: payments.count,
                 unreferencedIconReferences: candidateIconReferences
                     .subtracting(remainingSubscriptionReferences)
-                    .subtracting(templateReferences)
+                    .subtracting(templateReferences),
+                unreferencedPaymentAttachmentReferences: candidateAttachmentReferences
+                    .subtracting(remainingAttachmentReferences)
             )
         }
     }
@@ -268,12 +446,16 @@ actor SubscriptionStore {
                 subscription: makeDTO(record),
                 referenceDate: referenceDate,
                 cycleMonths: request.cycleMonths,
-                money: request.money
+                money: request.quotedMoney
             )
+            guard request.quotedMoney.minorUnits >= 0 else {
+                throw StoreError.invalidPaymentAmount
+            }
+            let periodID = UUID()
             modelContext.insert(
                 SubscriptionPeriodRecord(
                     input: SubscriptionPeriodCreateInput(
-                        id: UUID(),
+                        id: periodID,
                         subscriptionID: record.id,
                         billingKind: .recurring,
                         cycleMonths: preview.cycleMonths,
@@ -284,11 +466,23 @@ actor SubscriptionStore {
                     )
                 )
             )
+            let payment = SubscriptionPaymentCreateInput(
+                id: UUID(),
+                subscriptionID: record.id,
+                periodRecordID: periodID,
+                kind: .renewal,
+                paymentDate: request.paymentDate,
+                money: request.paymentMoney,
+                periodStart: preview.nextStart,
+                periodEnd: preview.nextExpiry,
+                note: request.paymentNote,
+                attachmentReferences: []
+            )
+            try validate(payment)
+            modelContext.insert(SubscriptionPaymentRecord(input: payment))
             record.applyRenewal(
                 start: preview.nextStart,
-                expiry: preview.nextExpiry,
-                cycleMonths: preview.cycleMonths,
-                money: preview.money
+                expiry: preview.nextExpiry
             )
             return preview
         }
@@ -421,6 +615,78 @@ actor SubscriptionStore {
         return record
     }
 
+    private func payment(
+        matching original: SubscriptionPaymentDTO
+    ) throws -> SubscriptionPaymentRecord {
+        let paymentID = original.id
+        let subscriptionID = original.subscriptionID
+        var descriptor = FetchDescriptor<SubscriptionPaymentRecord>(
+            predicate: #Predicate {
+                $0.id == paymentID && $0.subscriptionID == subscriptionID
+            }
+        )
+        descriptor.fetchLimit = 1
+        guard let record = try modelContext.fetch(descriptor).first else {
+            throw StoreError.paymentNotFound
+        }
+        let attachmentReferences = try paymentAttachmentReferencesByPaymentID(
+            paymentIDs: [record.id]
+        )[record.id] ?? []
+        guard try makePaymentDTO(
+            record,
+            attachmentReferences: attachmentReferences
+        ) == original else {
+            throw StoreError.revisionConflict
+        }
+        return record
+    }
+
+    private func validatePeriodLink(
+        _ periodRecordID: UUID?,
+        subscriptionID: UUID
+    ) throws {
+        guard let periodRecordID else { return }
+        var descriptor = FetchDescriptor<SubscriptionPeriodRecord>(
+            predicate: #Predicate {
+                $0.id == periodRecordID && $0.subscriptionID == subscriptionID
+            }
+        )
+        descriptor.fetchLimit = 1
+        guard try modelContext.fetch(descriptor).first != nil else {
+            throw StoreError.invalidPaymentPeriod
+        }
+    }
+
+    private func validate(_ input: SubscriptionPaymentCreateInput) throws {
+        try validate(
+            kind: input.kind,
+            paymentDate: input.paymentDate,
+            money: input.money,
+            periodStart: input.periodStart,
+            periodEnd: input.periodEnd
+        )
+    }
+
+    private func validate(
+        kind: SubscriptionPaymentKind,
+        paymentDate: LocalDate,
+        money: Money,
+        periodStart: LocalDate?,
+        periodEnd: LocalDate?
+    ) throws {
+        guard paymentDate <= .today else { throw StoreError.invalidPaymentDate }
+        guard money.minorUnits >= 0 else { throw StoreError.invalidPaymentAmount }
+        guard (periodStart == nil) == (periodEnd == nil) else {
+            throw StoreError.invalidPaymentPeriod
+        }
+        if kind == .renewal, periodStart == nil {
+            throw StoreError.invalidPaymentPeriod
+        }
+        if let periodStart, let periodEnd, periodStart > periodEnd {
+            throw StoreError.invalidPaymentPeriod
+        }
+    }
+
     private func makeDTO(_ record: SubscriptionRecord) throws -> SubscriptionDTO {
         guard let category = ServiceCategory(rawValue: record.categoryRaw) else {
             throw StoreError.invalidStoredValue("categoryRaw")
@@ -484,6 +750,107 @@ actor SubscriptionStore {
             source: source,
             createdAt: record.createdAt
         )
+    }
+
+    private func makePaymentDTO(
+        _ record: SubscriptionPaymentRecord,
+        attachmentReferences: [String]
+    ) throws -> SubscriptionPaymentDTO {
+        guard let kind = SubscriptionPaymentKind(rawValue: record.kindRaw) else {
+            throw StoreError.invalidStoredValue("payment.kindRaw")
+        }
+        guard let currency = CurrencyCode(rawValue: record.currencyCode),
+              currency.scale == record.currencyScale else {
+            throw StoreError.invalidStoredValue("payment.currencyCode")
+        }
+        guard attachmentReferences.allSatisfy(PaymentAttachmentReference.isValid),
+              PaymentAttachmentReference.removingDuplicates(attachmentReferences)
+                == attachmentReferences else {
+            throw StoreError.invalidStoredValue("payment.attachmentReferences")
+        }
+        return SubscriptionPaymentDTO(
+            id: record.id,
+            subscriptionID: record.subscriptionID,
+            periodRecordID: record.periodRecordID,
+            kind: kind,
+            paymentDate: LocalDate(dayNumber: record.paymentDay),
+            money: Money(minorUnits: record.amountMinor, currency: currency),
+            periodStart: record.periodStartDay.map(LocalDate.init(dayNumber:)),
+            periodEnd: record.periodEndDay.map(LocalDate.init(dayNumber:)),
+            note: record.note,
+            attachmentReferences: attachmentReferences,
+            revision: record.revision,
+            createdAt: record.createdAt,
+            updatedAt: record.updatedAt
+        )
+    }
+
+    private func paymentAttachmentReferencesByPaymentID(
+        paymentIDs: Set<UUID>
+    ) throws -> [UUID: [String]] {
+        guard !paymentIDs.isEmpty else { return [:] }
+        let paymentIDs = Array(paymentIDs)
+        let current = Dictionary(
+            grouping: try modelContext.fetch(
+                FetchDescriptor<SubscriptionPaymentAttachmentItemRecord>(
+                    predicate: #Predicate { paymentIDs.contains($0.paymentID) }
+                )
+            ),
+            by: \.paymentID
+        ).mapValues { records in
+            records.sorted {
+                ($0.sortOrder, $0.id.uuidString) < ($1.sortOrder, $1.id.uuidString)
+            }.map(\.reference)
+        }
+        let legacy = try modelContext.fetch(
+            FetchDescriptor<SubscriptionPaymentAttachmentRecord>(
+                predicate: #Predicate { paymentIDs.contains($0.paymentID) }
+            )
+        )
+        return legacy.reduce(into: current) { result, record in
+            if result[record.paymentID] == nil {
+                result[record.paymentID] = [record.reference]
+            }
+        }
+    }
+
+    private func paymentAttachments(
+        paymentID: UUID
+    ) throws -> [SubscriptionPaymentAttachmentItemRecord] {
+        let descriptor = FetchDescriptor<SubscriptionPaymentAttachmentItemRecord>(
+            predicate: #Predicate { $0.paymentID == paymentID }
+        )
+        return try modelContext.fetch(descriptor)
+    }
+
+    private func legacyPaymentAttachments(
+        paymentID: UUID
+    ) throws -> [SubscriptionPaymentAttachmentRecord] {
+        let descriptor = FetchDescriptor<SubscriptionPaymentAttachmentRecord>(
+            predicate: #Predicate { $0.paymentID == paymentID }
+        )
+        return try modelContext.fetch(descriptor)
+    }
+
+    private func replacePaymentAttachments(
+        paymentID: UUID,
+        references: [String]
+    ) throws {
+        let references = PaymentAttachmentReference.removingDuplicates(references)
+        guard references.allSatisfy(PaymentAttachmentReference.isValid) else {
+            throw StoreError.invalidStoredValue("payment.attachmentReferences")
+        }
+        try paymentAttachments(paymentID: paymentID).forEach(modelContext.delete)
+        try legacyPaymentAttachments(paymentID: paymentID).forEach(modelContext.delete)
+        for (sortOrder, reference) in references.enumerated() {
+            modelContext.insert(
+                SubscriptionPaymentAttachmentItemRecord(
+                    paymentID: paymentID,
+                    reference: reference,
+                    sortOrder: sortOrder
+                )
+            )
+        }
     }
 
     private func initialPeriod(

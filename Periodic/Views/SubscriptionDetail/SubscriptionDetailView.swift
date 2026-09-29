@@ -1,31 +1,59 @@
 import SwiftUI
 
+private enum SubscriptionDetailSection: String, CaseIterable, Identifiable {
+    case periods
+    case activity
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .periods: AppLocalization.string("周期")
+        case .activity: AppLocalization.string("动态")
+        }
+    }
+}
+
 struct SubscriptionDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.currencyDisplayStyle) private var currencyDisplayStyle
 
     let subscription: SubscriptionDTO
     let onEditSubscription: @MainActor () -> Void
-    let loadPeriods: @MainActor (UUID) async throws -> [SubscriptionPeriodDTO]
+    let loadDetail: @MainActor (UUID) async throws -> SubscriptionDetailSnapshot
     let addPeriod: @MainActor (SubscriptionPeriodAddInput) async throws -> Void
     let updatePeriod: @MainActor (SubscriptionPeriodUpdateInput) async throws -> Void
     let deletePeriod: @MainActor (SubscriptionPeriodDeleteInput) async throws -> Void
+    let addPayment: @MainActor (SubscriptionPaymentAddInput) async throws -> Void
+    let updatePayment: @MainActor (SubscriptionPaymentUpdateInput) async throws -> Void
+    let deletePayment: @MainActor (SubscriptionPaymentDeleteInput) async throws -> Void
     let confirmAutomaticRenewal: @MainActor (SubscriptionRenewalRequest) async throws -> Void
     let markAutomaticRenewalNotRenewed: @MainActor (
         SubscriptionNonRenewalRequest
     ) async throws -> Void
 
     @State private var periods: [SubscriptionPeriodDTO] = []
+    @State private var payments: [SubscriptionPaymentDTO] = []
+    @State private var loadedSubscription: SubscriptionDTO?
+    @State private var selectedSection = SubscriptionDetailSection.periods
     @State private var isLoading = false
+    @State private var reloadGeneration = 0
     @State private var periodDraft: SubscriptionPeriodDraft?
     @State private var isSavingPeriod = false
     @State private var periodPendingDeletion: SubscriptionPeriodDTO?
     @State private var isDeletingPeriod = false
+    @State private var paymentDraft: SubscriptionPaymentDraft?
+    @State private var paymentPendingDeletion: SubscriptionPaymentDTO?
+    @State private var isDeletingPayment = false
     @State private var isConfirmingRenewal = false
     @State private var isPresentingRenewalOptions = false
     @State private var isPresentingNonRenewalConfirmation = false
     @State private var renewalEditorPreview: SubscriptionRenewalPreview?
     @State private var error: PresentedError?
+
+    private var currentSubscription: SubscriptionDTO {
+        loadedSubscription ?? subscription
+    }
 
     private var rows: [SubscriptionPeriodRow] {
         var result = periods.enumerated().map { index, period in
@@ -50,7 +78,7 @@ struct SubscriptionDetailView: View {
     var body: some View {
         VStack(spacing: 0) {
             SubscriptionDetailHeaderView(
-                subscription: subscription,
+                subscription: currentSubscription,
                 canConfirmRenewal: renewalPreview != nil,
                 isConfirmingRenewal: isConfirmingRenewal,
                 onMarkNotRenewed: { isPresentingNonRenewalConfirmation = true },
@@ -58,31 +86,29 @@ struct SubscriptionDetailView: View {
                 onEditSubscription: onEditSubscription
             )
             Divider()
-            SubscriptionPeriodHistoryView(
-                rows: rows,
-                draft: $periodDraft,
-                isLoading: isLoading,
-                isSaving: isSavingPeriod,
-                isDeleting: isDeletingPeriod,
-                onCreate: beginPeriodCreation,
-                onEdit: beginPeriodEditing,
-                onSave: savePeriodEditing,
-                onCancel: cancelPeriodEditing,
-                onDelete: { periodPendingDeletion = $0 }
+            HStack {
+                Spacer()
+                Picker("历史类型", selection: $selectedSection) {
+                    ForEach(SubscriptionDetailSection.allCases) { section in
+                        Text(section.title).tag(section)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .fixedSize()
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
+            .disabled(
+                periodDraft != nil || isSavingPeriod || isDeletingPeriod || isDeletingPayment
             )
+            detailContent
             Divider()
             HStack {
-                Text("共 \(periods.count) 次")
+                Text(summaryTitle)
                     .foregroundStyle(.secondary)
                 Spacer()
-                if !rows.isEmpty {
-                    Button("添加记录") {
-                        beginPeriodCreation()
-                    }
-                    .disabled(
-                        periodDraft != nil || isSavingPeriod || isDeletingPeriod || isLoading
-                    )
-                }
+                primaryHistoryAction
 
                 Button(dismissButtonTitle) {
                     if periodDraft == nil {
@@ -100,6 +126,10 @@ struct SubscriptionDetailView: View {
         .frame(width: 960, height: 560)
         .presentationSizing(.fitted)
         .task(id: subscription.id) { await reload() }
+        .onChange(of: subscription.revision) { _, newRevision in
+            guard loadedSubscription?.revision != newRevision else { return }
+            Task { @MainActor in await reload() }
+        }
         .errorAlert($error)
         .confirmationDialog(
             "选择续费方式",
@@ -135,6 +165,25 @@ struct SubscriptionDetailView: View {
                 onConfirmed: { await reload() }
             )
         }
+        .sheet(item: $paymentDraft) { draft in
+            SubscriptionPaymentEditorView(draft: draft, periods: periods) { savedDraft in
+                if savedDraft.isCreating {
+                    let input = try savedDraft.addInput(
+                        subscriptionID: currentSubscription.id,
+                        expectedSubscriptionRevision: currentSubscription.revision,
+                        periods: periods
+                    )
+                    try await addPayment(input)
+                } else {
+                    let input = try savedDraft.updateInput(
+                        expectedSubscriptionRevision: currentSubscription.revision,
+                        periods: periods
+                    )
+                    try await updatePayment(input)
+                }
+                await reload()
+            }
+        }
         .confirmationDialog(
             "删除这条周期记录？",
             isPresented: Binding(
@@ -149,9 +198,75 @@ struct SubscriptionDetailView: View {
             }
             Button("取消", role: .cancel) {}
         } message: { _ in
-            Text("此操作只删除历史记录，不会修改订阅当前的开始日期或到期日。")
+            Text("此操作只删除周期记录并解除消费关联，不会删除消费，也不会修改订阅当前的开始日期或到期日。")
+        }
+        .confirmationDialog(
+            "删除这条消费记录？",
+            isPresented: Binding(
+                get: { paymentPendingDeletion != nil },
+                set: { if !$0 { paymentPendingDeletion = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: paymentPendingDeletion
+        ) { payment in
+            Button("删除消费记录", role: .destructive) {
+                delete(payment)
+            }
+            Button("取消", role: .cancel) {}
+        } message: { _ in
+            Text("删除后实际支出会同步更新；关联的周期记录仍会保留。")
         }
         .accessibilityIdentifier("subscription-detail")
+    }
+
+    @ViewBuilder
+    private var detailContent: some View {
+        switch selectedSection {
+        case .periods:
+            SubscriptionPeriodHistoryView(
+                rows: rows,
+                draft: $periodDraft,
+                isLoading: isLoading,
+                isSaving: isSavingPeriod,
+                isDeleting: isDeletingPeriod,
+                onEdit: beginPeriodEditing,
+                onSave: savePeriodEditing,
+                onCancel: cancelPeriodEditing,
+                onDelete: { periodPendingDeletion = $0 }
+            )
+        case .activity:
+            SubscriptionActivityView(
+                payments: payments,
+                periods: periods,
+                isLoading: isLoading,
+                isDeleting: isDeletingPayment,
+                onEdit: { paymentDraft = SubscriptionPaymentDraft(payment: $0) },
+                onDelete: { paymentPendingDeletion = $0 }
+            )
+        }
+    }
+
+    private var summaryTitle: String {
+        switch selectedSection {
+        case .periods: String(format: AppLocalization.string("共 %d 次"), periods.count)
+        case .activity: String(format: AppLocalization.string("共 %d 笔消费"), payments.count)
+        }
+    }
+
+    @ViewBuilder
+    private var primaryHistoryAction: some View {
+        switch selectedSection {
+        case .periods:
+            Button("添加周期") { beginPeriodCreation() }
+                .disabled(
+                    periodDraft != nil || isSavingPeriod || isDeletingPeriod || isLoading
+                )
+        case .activity:
+            Button("记录消费") {
+                paymentDraft = SubscriptionPaymentDraft(subscription: currentSubscription)
+            }
+            .disabled(isDeletingPayment || isLoading)
+        }
     }
 
     private var dismissButtonTitle: String {
@@ -161,7 +276,7 @@ struct SubscriptionDetailView: View {
 
     private func beginPeriodCreation() {
         guard periodDraft == nil else { return }
-        periodDraft = SubscriptionPeriodDraft(subscription: subscription)
+        periodDraft = SubscriptionPeriodDraft(subscription: currentSubscription)
     }
 
     private func beginPeriodEditing(_ period: SubscriptionPeriodDTO) {
@@ -179,13 +294,13 @@ struct SubscriptionDetailView: View {
         do {
             if periodDraft.isCreating {
                 let input = try periodDraft.addInput(
-                    subscriptionID: subscription.id,
-                    expectedSubscriptionRevision: subscription.revision
+                    subscriptionID: currentSubscription.id,
+                    expectedSubscriptionRevision: currentSubscription.revision
                 )
                 persistPeriod { try await addPeriod(input) }
             } else {
                 let input = try periodDraft.updateInput(
-                    expectedSubscriptionRevision: subscription.revision
+                    expectedSubscriptionRevision: currentSubscription.revision
                 )
                 persistPeriod { try await updatePeriod(input) }
             }
@@ -215,7 +330,7 @@ struct SubscriptionDetailView: View {
         isDeletingPeriod = true
         let input = SubscriptionPeriodDeleteInput(
             original: period,
-            expectedSubscriptionRevision: subscription.revision
+            expectedSubscriptionRevision: currentSubscription.revision
         )
         Task { @MainActor in
             do {
@@ -230,9 +345,28 @@ struct SubscriptionDetailView: View {
         }
     }
 
+    private func delete(_ payment: SubscriptionPaymentDTO) {
+        isDeletingPayment = true
+        let input = SubscriptionPaymentDeleteInput(
+            original: payment,
+            expectedSubscriptionRevision: currentSubscription.revision
+        )
+        Task { @MainActor in
+            do {
+                try await deletePayment(input)
+                paymentPendingDeletion = nil
+                isDeletingPayment = false
+                await reload()
+            } catch {
+                self.error = PresentedError(error, title: "无法删除消费记录")
+                isDeletingPayment = false
+            }
+        }
+    }
+
     private var renewalPreview: SubscriptionRenewalPreview? {
         try? SubscriptionRenewalRule.preview(
-            subscription: subscription,
+            subscription: currentSubscription,
             referenceDate: .today
         )
     }
@@ -247,11 +381,14 @@ struct SubscriptionDetailView: View {
         guard let renewalPreview else { return }
         isConfirmingRenewal = true
         let request = SubscriptionRenewalRequest(
-            subscriptionID: subscription.id,
+            subscriptionID: currentSubscription.id,
             expectedRevision: renewalPreview.expectedRevision,
             expectedExpiry: renewalPreview.previousExpiry,
             cycleMonths: renewalPreview.cycleMonths,
-            money: renewalPreview.money
+            quotedMoney: renewalPreview.money,
+            paymentDate: .today,
+            paymentMoney: renewalPreview.money,
+            paymentNote: ""
         )
         Task { @MainActor in
             do {
@@ -269,7 +406,7 @@ struct SubscriptionDetailView: View {
         guard let renewalPreview else { return }
         isConfirmingRenewal = true
         let request = SubscriptionNonRenewalRequest(
-            subscriptionID: subscription.id,
+            subscriptionID: currentSubscription.id,
             expectedRevision: renewalPreview.expectedRevision,
             expectedExpiry: renewalPreview.previousExpiry
         )
@@ -287,12 +424,23 @@ struct SubscriptionDetailView: View {
 
     @MainActor
     private func reload() async {
+        reloadGeneration &+= 1
+        let generation = reloadGeneration
         isLoading = true
-        defer { isLoading = false }
+        defer {
+            if generation == reloadGeneration {
+                isLoading = false
+            }
+        }
         do {
-            periods = try await loadPeriods(subscription.id)
+            let snapshot = try await loadDetail(subscription.id)
+            guard generation == reloadGeneration else { return }
+            loadedSubscription = snapshot.subscription
+            periods = snapshot.periods
+            payments = snapshot.payments
             error = nil
         } catch {
+            guard generation == reloadGeneration else { return }
             self.error = PresentedError(error, title: "无法读取订阅详情")
         }
     }

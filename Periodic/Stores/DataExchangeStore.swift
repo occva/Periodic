@@ -5,6 +5,7 @@ import SwiftData
 @ModelActor
 actor DataExchangeStore {
     func snapshot() throws -> DataPackageSnapshot {
+        let paymentAttachmentReferences = try paymentAttachmentReferencesByPaymentID()
         let subscriptions = try modelContext.fetch(FetchDescriptor<SubscriptionRecord>())
             .map { record in
                 DataPackageSubscription(
@@ -57,6 +58,36 @@ actor DataExchangeStore {
             .sorted {
                 ($0.subscriptionID.uuidString, $0.start.dayNumber, $0.id.uuidString)
                     < ($1.subscriptionID.uuidString, $1.start.dayNumber, $1.id.uuidString)
+            }
+
+        let payments = try modelContext.fetch(FetchDescriptor<SubscriptionPaymentRecord>())
+            .map { record in
+                DataPackagePayment(
+                    recordVersion: 1,
+                    id: record.id,
+                    subscriptionID: record.subscriptionID,
+                    periodRecordID: record.periodRecordID,
+                    kind: try value(
+                        SubscriptionPaymentKind.self,
+                        raw: record.kindRaw,
+                        field: "payment.kind"
+                    ),
+                    paymentDate: LocalDate(dayNumber: record.paymentDay),
+                    amountMinor: record.amountMinor,
+                    currency: try currency(record.currencyCode, scale: record.currencyScale),
+                    currencyScale: record.currencyScale,
+                    periodStart: record.periodStartDay.map(LocalDate.init(dayNumber:)),
+                    periodEnd: record.periodEndDay.map(LocalDate.init(dayNumber:)),
+                    note: record.note,
+                    attachmentAssetIDs: paymentAttachmentReferences[record.id] ?? [],
+                    revision: record.revision,
+                    createdAt: record.createdAt,
+                    updatedAt: record.updatedAt
+                )
+            }
+            .sorted {
+                ($0.subscriptionID.uuidString, $0.paymentDate.dayNumber, $0.id.uuidString)
+                    < ($1.subscriptionID.uuidString, $1.paymentDate.dayNumber, $1.id.uuidString)
             }
 
         let templates = try modelContext.fetch(FetchDescriptor<ServiceTemplateRecord>())
@@ -113,6 +144,7 @@ actor DataExchangeStore {
         return DataPackageSnapshot(
             subscriptions: subscriptions,
             periods: periods,
+            payments: payments,
             templates: templates,
             categories: categories,
             builtinCategoryAssignments: assignments,
@@ -135,11 +167,22 @@ actor DataExchangeStore {
         return Set(subscriptionReferences).union(templateReferences)
     }
 
+    func referencedPaymentAttachmentReferences() throws -> Set<String> {
+        let current = try modelContext.fetch(
+            FetchDescriptor<SubscriptionPaymentAttachmentItemRecord>()
+        ).map(\.reference)
+        let legacy = try modelContext.fetch(
+            FetchDescriptor<SubscriptionPaymentAttachmentRecord>()
+        ).map(\.reference)
+        return Set(current).union(legacy)
+    }
+
     func preview(imported: DataPackageSnapshot) throws -> DataImportPreview {
         let local = try snapshot()
         return DataImportPreview(
             subscriptions: changes(local.subscriptions, imported.subscriptions),
             periods: changes(local.periods, imported.periods),
+            payments: changes(local.payments, imported.payments),
             templates: changes(local.templates, imported.templates),
             categories: changes(local.categories, imported.categories),
             assignments: changes(local.builtinCategoryAssignments, imported.builtinCategoryAssignments),
@@ -158,6 +201,7 @@ actor DataExchangeStore {
             let localCategoriesByID = Dictionary(uniqueKeysWithValues: local.categories.map { ($0.id, $0) })
             let localSubscriptionsByID = Dictionary(uniqueKeysWithValues: local.subscriptions.map { ($0.id, $0) })
             let localPeriodsByID = Dictionary(uniqueKeysWithValues: local.periods.map { ($0.id, $0) })
+            let localPaymentsByID = Dictionary(uniqueKeysWithValues: local.payments.map { ($0.id, $0) })
             let localTemplatesByID = Dictionary(uniqueKeysWithValues: local.templates.map { ($0.id, $0) })
             let localAssignmentsByKey = Dictionary(
                 uniqueKeysWithValues: local.builtinCategoryAssignments.map { ($0.templateKey, $0) }
@@ -221,6 +265,54 @@ actor DataExchangeStore {
                     }
                 } else {
                     modelContext.insert(makePeriod(incoming))
+                    added += 1
+                }
+            }
+
+            let payments = try modelContext.fetch(FetchDescriptor<SubscriptionPaymentRecord>())
+            let paymentsByID = Dictionary(uniqueKeysWithValues: payments.map { ($0.id, $0) })
+            let paymentAttachments = try modelContext.fetch(
+                FetchDescriptor<SubscriptionPaymentAttachmentItemRecord>()
+            )
+            let paymentAttachmentsByPaymentID = Dictionary(
+                grouping: paymentAttachments,
+                by: \.paymentID
+            )
+            let importedPeriodsByID = Dictionary(
+                uniqueKeysWithValues: imported.periods.map { ($0.id, $0) }
+            )
+            for incoming in imported.payments {
+                guard validSubscriptionIDs.contains(incoming.subscriptionID) else {
+                    throw DataExchangeError.invalidRecord("消费记录缺少对应订阅")
+                }
+                if let periodID = incoming.periodRecordID {
+                    let linkedSubscriptionID = periodsByID[periodID]?.subscriptionID
+                        ?? importedPeriodsByID[periodID]?.subscriptionID
+                    guard linkedSubscriptionID == incoming.subscriptionID else {
+                        throw DataExchangeError.invalidRecord("消费记录缺少对应周期")
+                    }
+                }
+                if let record = paymentsByID[incoming.id] {
+                    if localPaymentsByID[incoming.id] == incoming {
+                        skipped += 1
+                    } else if conflictResolution == .useImported {
+                        apply(incoming, to: record)
+                        try replacePaymentAttachments(
+                            incoming.attachmentAssetIDs,
+                            paymentID: incoming.id,
+                            existing: paymentAttachmentsByPaymentID[incoming.id] ?? []
+                        )
+                        updated += 1
+                    } else {
+                        skipped += 1
+                    }
+                } else {
+                    modelContext.insert(makePayment(incoming))
+                    try replacePaymentAttachments(
+                        incoming.attachmentAssetIDs,
+                        paymentID: incoming.id,
+                        existing: []
+                    )
                     added += 1
                 }
             }
@@ -387,6 +479,91 @@ actor DataExchangeStore {
         record.currencyScale = value.currencyScale
         record.sourceRaw = value.source.rawValue
         record.createdAt = value.createdAt
+    }
+
+    private func makePayment(_ value: DataPackagePayment) -> SubscriptionPaymentRecord {
+        let record = SubscriptionPaymentRecord(
+            input: SubscriptionPaymentCreateInput(
+                id: value.id,
+                subscriptionID: value.subscriptionID,
+                periodRecordID: value.periodRecordID,
+                kind: value.kind,
+                paymentDate: value.paymentDate,
+                money: Money(minorUnits: value.amountMinor, currency: value.currency),
+                periodStart: value.periodStart,
+                periodEnd: value.periodEnd,
+                note: value.note,
+                attachmentReferences: []
+            ),
+            now: value.createdAt
+        )
+        apply(value, to: record)
+        record.revision = max(value.revision, 1)
+        record.createdAt = value.createdAt
+        record.updatedAt = value.updatedAt
+        return record
+    }
+
+    private func apply(_ value: DataPackagePayment, to record: SubscriptionPaymentRecord) {
+        record.subscriptionID = value.subscriptionID
+        record.periodRecordID = value.periodRecordID
+        record.kindRaw = value.kind.rawValue
+        record.paymentDay = value.paymentDate.dayNumber
+        record.amountMinor = value.amountMinor
+        record.currencyCode = value.currency.rawValue
+        record.currencyScale = value.currencyScale
+        record.periodStartDay = value.periodStart?.dayNumber
+        record.periodEndDay = value.periodEnd?.dayNumber
+        record.note = value.note
+        record.revision = max(record.revision + 1, 1)
+        record.updatedAt = .now
+    }
+
+    private func replacePaymentAttachments(
+        _ references: [String],
+        paymentID: UUID,
+        existing: [SubscriptionPaymentAttachmentItemRecord]
+    ) throws {
+        let references = PaymentAttachmentReference.removingDuplicates(references)
+        guard references.allSatisfy(PaymentAttachmentReference.isValid) else {
+            throw DataExchangeError.invalidRecord("消费截图引用无效")
+        }
+        existing.forEach(modelContext.delete)
+        let targetPaymentID = paymentID
+        let legacyDescriptor = FetchDescriptor<SubscriptionPaymentAttachmentRecord>(
+            predicate: #Predicate { $0.paymentID == targetPaymentID }
+        )
+        try modelContext.fetch(legacyDescriptor).forEach(modelContext.delete)
+        for (sortOrder, reference) in references.enumerated() {
+            modelContext.insert(
+                SubscriptionPaymentAttachmentItemRecord(
+                    paymentID: paymentID,
+                    reference: reference,
+                    sortOrder: sortOrder
+                )
+            )
+        }
+    }
+
+    private func paymentAttachmentReferencesByPaymentID() throws -> [UUID: [String]] {
+        let current = Dictionary(
+            grouping: try modelContext.fetch(
+                FetchDescriptor<SubscriptionPaymentAttachmentItemRecord>()
+            ),
+            by: \.paymentID
+        ).mapValues { records in
+            records.sorted {
+                ($0.sortOrder, $0.id.uuidString) < ($1.sortOrder, $1.id.uuidString)
+            }.map(\.reference)
+        }
+        let legacy = try modelContext.fetch(
+            FetchDescriptor<SubscriptionPaymentAttachmentRecord>()
+        )
+        return legacy.reduce(into: current) { result, record in
+            if result[record.paymentID] == nil {
+                result[record.paymentID] = [record.reference]
+            }
+        }
     }
 
     private func makeTemplate(_ value: DataPackageTemplate) throws -> ServiceTemplateRecord {

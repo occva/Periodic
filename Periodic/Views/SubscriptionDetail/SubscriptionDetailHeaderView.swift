@@ -50,7 +50,7 @@ struct SubscriptionDetailHeaderView: View {
                 Button("已续费", action: onConfirmRenewal)
                 .disabled(isConfirmingRenewal)
                 .buttonStyle(.glassProminent)
-                .accessibilityHint("更新当前周期并添加一条续费周期记录")
+                .accessibilityHint("更新当前周期并添加续费周期和消费记录")
             } else {
                 Text("服务商自动续费")
                     .foregroundStyle(.secondary)

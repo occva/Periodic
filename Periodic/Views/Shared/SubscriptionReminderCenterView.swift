@@ -287,7 +287,10 @@ struct SubscriptionReminderCenterView: View {
             expectedRevision: preview.expectedRevision,
             expectedExpiry: preview.previousExpiry,
             cycleMonths: preview.cycleMonths,
-            money: preview.money
+            quotedMoney: preview.money,
+            paymentDate: .today,
+            paymentMoney: preview.money,
+            paymentNote: ""
         )
         Task { @MainActor in
             do {

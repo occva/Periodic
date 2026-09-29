@@ -9,7 +9,6 @@ struct SubscriptionPeriodHistoryView: View {
     let isLoading: Bool
     let isSaving: Bool
     let isDeleting: Bool
-    let onCreate: @MainActor () -> Void
     let onEdit: @MainActor (SubscriptionPeriodDTO) -> Void
     let onSave: @MainActor () -> Void
     let onCancel: @MainActor () -> Void
@@ -24,9 +23,6 @@ struct SubscriptionPeriodHistoryView: View {
                 Label("暂无订阅次数", systemImage: "calendar.badge.clock")
             } description: {
                 Text("周期订阅具有完整开始和结束日期时会记录首次周期，也可以手动添加记录。")
-            } actions: {
-                Button("添加记录", action: onCreate)
-                    .buttonStyle(.glass)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {

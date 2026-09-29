@@ -591,7 +591,13 @@ struct SubscriptionDomainTests {
     @Test func confirmingAutomaticRenewalUpdatesCurrentPeriodAndAppendsHistoryOnce() async throws {
         let controller = PersistenceController()
         let container = try controller.makeContainer(
-            schema: Schema([SubscriptionRecord.self, SubscriptionPeriodRecord.self]),
+            schema: Schema([
+                SubscriptionRecord.self,
+                SubscriptionPeriodRecord.self,
+                SubscriptionPaymentRecord.self,
+                SubscriptionPaymentAttachmentRecord.self,
+                SubscriptionPaymentAttachmentItemRecord.self,
+            ]),
             inMemory: true
         )
         let store = SubscriptionStore(modelContainer: container)
@@ -620,7 +626,10 @@ struct SubscriptionDomainTests {
             expectedRevision: current.revision,
             expectedExpiry: expiry,
             cycleMonths: 3,
-            money: Money(minorUnits: 5_400, currency: .usd)
+            quotedMoney: Money(minorUnits: 5_400, currency: .usd),
+            paymentDate: expiry,
+            paymentMoney: Money(minorUnits: 4_900, currency: .usd),
+            paymentNote: "折扣续费"
         )
 
         let preview = try await store.confirmAutomaticRenewal(request, referenceDate: expiry)
@@ -629,18 +638,25 @@ struct SubscriptionDomainTests {
 
         #expect(updated.periodStart == preview.nextStart)
         #expect(updated.expiry == preview.nextExpiry)
-        #expect(updated.cycleMonths == 3)
-        #expect(updated.money == Money(minorUnits: 5_400, currency: .usd))
+        #expect(updated.cycleMonths == 1)
+        #expect(updated.money == Money(minorUnits: 2_000, currency: .usd))
         #expect(updated.revision == current.revision + 1)
         #expect(periods.count == 2)
         #expect(periods.first?.source == .initial)
         #expect(periods.last?.source == .renewal)
         #expect(periods.last?.cycleMonths == 3)
         #expect(periods.last?.money == Money(minorUnits: 5_400, currency: .usd))
+        let payments = try await store.fetchPayments(for: current.id)
+        #expect(payments.count == 1)
+        #expect(payments.first?.periodRecordID == periods.last?.id)
+        #expect(payments.first?.kind == .renewal)
+        #expect(payments.first?.money == Money(minorUnits: 4_900, currency: .usd))
+        #expect(payments.first?.note == "折扣续费")
         await #expect(throws: SubscriptionStore.StoreError.self) {
             try await store.confirmAutomaticRenewal(request, referenceDate: expiry)
         }
         #expect(try await store.fetchPeriods(for: current.id).count == 2)
+        #expect(try await store.fetchPayments(for: current.id).count == 1)
     }
 
     @MainActor

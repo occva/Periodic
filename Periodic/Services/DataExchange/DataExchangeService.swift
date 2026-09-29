@@ -3,10 +3,16 @@ import Foundation
 actor DataExchangeService {
     private let store: DataExchangeStore
     private let iconCache: AppleIconCache
+    private let paymentAttachmentStore: PaymentAttachmentStore
 
-    init(store: DataExchangeStore, iconCache: AppleIconCache) {
+    init(
+        store: DataExchangeStore,
+        iconCache: AppleIconCache,
+        paymentAttachmentStore: PaymentAttachmentStore
+    ) {
         self.store = store
         self.iconCache = iconCache
+        self.paymentAttachmentStore = paymentAttachmentStore
     }
 
     func previewExport() async throws -> DataExportPreview {
@@ -14,6 +20,7 @@ actor DataExchangeService {
         return DataExportPreview(
             subscriptions: snapshot.subscriptions.count,
             periods: snapshot.periods.count,
+            payments: snapshot.payments.count,
             templates: snapshot.templates.count,
             categories: snapshot.categories.count,
             assignments: snapshot.builtinCategoryAssignments.count
@@ -47,6 +54,21 @@ actor DataExchangeService {
             copy.iconAssetID = value.iconAssetID.flatMap { referenceToAsset[$0] }
             return copy
         }
+        var attachmentReferenceToAsset: [String: String] = [:]
+        let attachmentReferences = Set(snapshot.payments.flatMap(\.attachmentAssetIDs))
+        for reference in attachmentReferences.sorted() {
+            let data = try await paymentAttachmentStore.data(for: reference)
+            let identifier = DataPackageCodec.sha256(data)
+            assets[identifier] = data
+            attachmentReferenceToAsset[reference] = identifier
+        }
+        snapshot.payments = snapshot.payments.map { value in
+            var copy = value
+            copy.attachmentAssetIDs = value.attachmentAssetIDs.map {
+                attachmentReferenceToAsset[$0] ?? $0
+            }
+            return copy
+        }
         return try DataPackageCodec.encode(
             snapshot: snapshot,
             assets: assets,
@@ -75,6 +97,7 @@ actor DataExchangeService {
         let preview = DataImportPreview(
             subscriptions: basePreview.subscriptions,
             periods: basePreview.periods,
+            payments: basePreview.payments,
             templates: basePreview.templates,
             categories: basePreview.categories,
             assignments: basePreview.assignments,
@@ -111,6 +134,18 @@ actor DataExchangeService {
             copy.iconAssetID = value.iconAssetID.flatMap { assetToReference[$0] ?? $0 }
             return copy
         }
+        var attachmentAssetToReference: [String: String] = [:]
+        for reference in Set(local.payments.flatMap(\.attachmentAssetIDs)) {
+            let data = try await paymentAttachmentStore.data(for: reference)
+            attachmentAssetToReference[DataPackageCodec.sha256(data)] = reference
+        }
+        snapshot.payments = snapshot.payments.map { value in
+            var copy = value
+            copy.attachmentAssetIDs = value.attachmentAssetIDs.map {
+                attachmentAssetToReference[$0] ?? $0
+            }
+            return copy
+        }
         return snapshot
     }
 
@@ -120,28 +155,60 @@ actor DataExchangeService {
         importsSettings: Bool
     ) async throws -> DataImportReceipt {
         guard plan.expiresAt > Date() else { throw DataExchangeError.planExpired }
-        var writes: [AppleIconCache.ImportedImageWrite] = []
-        var assetReferences: [String: String] = [:]
+        let iconAssetIdentifiers = Set(
+            plan.package.snapshot.subscriptions.compactMap(\.iconAssetID)
+        ).union(plan.package.snapshot.templates.compactMap(\.iconAssetID))
+        let paymentAssetIdentifiers = Set(
+            plan.package.snapshot.payments.flatMap(\.attachmentAssetIDs)
+        )
+        let previousPaymentAttachmentReferences = try await store
+            .referencedPaymentAttachmentReferences()
+        var iconWrites: [AppleIconCache.ImportedImageWrite] = []
+        var paymentWrites: [PaymentAttachmentStore.ImportedImageWrite] = []
+        var iconAssetReferences: [String: String] = [:]
+        var paymentAssetReferences: [String: String] = [:]
         do {
-            for (identifier, data) in plan.package.assets {
+            for identifier in iconAssetIdentifiers.sorted() {
+                guard let data = plan.package.assets[identifier] else {
+                    throw DataExchangeError.invalidPackage("图片引用缺少文件")
+                }
                 let write = try await iconCache.persistImportedImage(data)
-                writes.append(write)
-                assetReferences[identifier] = write.reference
+                iconWrites.append(write)
+                iconAssetReferences[identifier] = write.reference
+            }
+            for identifier in paymentAssetIdentifiers.sorted() {
+                guard let data = plan.package.assets[identifier] else {
+                    throw DataExchangeError.invalidPackage("消费截图引用缺少文件")
+                }
+                let write = try await paymentAttachmentStore.persistImportedImage(data)
+                paymentWrites.append(write)
+                paymentAssetReferences[identifier] = write.reference
             }
         } catch {
-            await iconCache.discardImportedImages(writes)
+            await iconCache.discardImportedImages(iconWrites)
+            await paymentAttachmentStore.discardImportedImages(
+                paymentWrites,
+                keeping: previousPaymentAttachmentReferences
+            )
             throw error
         }
 
         var snapshot = plan.package.snapshot
         snapshot.subscriptions = snapshot.subscriptions.map { value in
             var copy = value
-            copy.iconAssetID = value.iconAssetID.flatMap { assetReferences[$0] }
+            copy.iconAssetID = value.iconAssetID.flatMap { iconAssetReferences[$0] }
             return copy
         }
         snapshot.templates = snapshot.templates.map { value in
             var copy = value
-            copy.iconAssetID = value.iconAssetID.flatMap { assetReferences[$0] }
+            copy.iconAssetID = value.iconAssetID.flatMap { iconAssetReferences[$0] }
+            return copy
+        }
+        snapshot.payments = snapshot.payments.map { value in
+            var copy = value
+            copy.attachmentAssetIDs = value.attachmentAssetIDs.map {
+                paymentAssetReferences[$0] ?? $0
+            }
             return copy
         }
 
@@ -153,16 +220,29 @@ actor DataExchangeService {
                 conflictResolution: conflictResolution
             )
         } catch {
-            await iconCache.discardImportedImages(writes)
+            await iconCache.discardImportedImages(iconWrites)
+            await paymentAttachmentStore.discardImportedImages(
+                paymentWrites,
+                keeping: previousPaymentAttachmentReferences
+            )
             throw error
         }
 
         do {
             let referencedImages = try await store.referencedIconReferences()
-            await iconCache.discardImportedImages(writes, keeping: referencedImages)
+            await iconCache.discardImportedImages(iconWrites, keeping: referencedImages)
+            let referencedPaymentAttachments = try await store
+                .referencedPaymentAttachmentReferences()
+            await paymentAttachmentStore.releaseImportedImages(paymentWrites)
+            _ = await paymentAttachmentStore.removeStoredImages(
+                references: previousPaymentAttachmentReferences.subtracting(
+                    referencedPaymentAttachments
+                )
+            )
         } catch {
             // The database transaction has committed. Retain the files rather
             // than deleting assets that may now be referenced by imported rows.
+            await paymentAttachmentStore.releaseImportedImages(paymentWrites)
             AppLog.persistence.error("Failed to remove unreferenced imported icons")
         }
         if importsSettings, let settings = snapshot.settings {

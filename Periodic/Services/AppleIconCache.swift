@@ -1,7 +1,5 @@
 import CryptoKit
 import Foundation
-import ImageIO
-import UniformTypeIdentifiers
 
 actor AppleIconCache {
     struct ImportedImageWrite: Sendable {
@@ -50,9 +48,6 @@ actor AppleIconCache {
 
     private static let referencePrefix = "apple-icon:"
     private static let localReferencePrefix = "user-icon:"
-    private static let maximumImageSize = 10 * 1_024 * 1_024
-    private static let maximumPixelCount = 32_000_000
-
     func persist(from url: URL) async throws -> String {
         guard url.scheme == "https" else { throw CacheError.invalidURL }
         guard let host = url.host?.lowercased(),
@@ -67,7 +62,7 @@ actor AppleIconCache {
               !data.isEmpty else {
             throw CacheError.invalidResponse
         }
-        guard data.count <= Self.maximumImageSize else {
+        guard data.count <= ImageAssetValidator.maximumImageSize else {
             throw CacheError.imageTooLarge
         }
         try validateImageData(data)
@@ -89,14 +84,14 @@ actor AppleIconCache {
 
         let resourceValues = try url.resourceValues(forKeys: [.fileSizeKey])
         if let fileSize = resourceValues.fileSize,
-           fileSize > Self.maximumImageSize {
+           fileSize > ImageAssetValidator.maximumImageSize {
             throw CacheError.imageTooLarge
         }
 
         let handle = try FileHandle(forReadingFrom: url)
         defer { try? handle.close() }
-        let data = try handle.read(upToCount: Self.maximumImageSize + 1) ?? Data()
-        guard data.count <= Self.maximumImageSize else {
+        let data = try handle.read(upToCount: ImageAssetValidator.maximumImageSize + 1) ?? Data()
+        guard data.count <= ImageAssetValidator.maximumImageSize else {
             throw CacheError.imageTooLarge
         }
         try validateImageData(data)
@@ -112,7 +107,7 @@ actor AppleIconCache {
     }
 
     func persistImportedImage(_ data: Data) throws -> ImportedImageWrite {
-        guard data.count <= Self.maximumImageSize else {
+        guard data.count <= ImageAssetValidator.maximumImageSize else {
             throw CacheError.imageTooLarge
         }
         try validateImageData(data)
@@ -180,7 +175,7 @@ actor AppleIconCache {
     }
 
     func validateImportedImage(_ data: Data) throws {
-        guard data.count <= Self.maximumImageSize else {
+        guard data.count <= ImageAssetValidator.maximumImageSize else {
             throw CacheError.imageTooLarge
         }
         try validateImageData(data)
@@ -278,23 +273,14 @@ actor AppleIconCache {
     }
 
     private func validateImageData(_ data: Data) throws {
-        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
-              CGImageSourceGetCount(source) > 0,
-              CGImageSourceCreateImageAtIndex(source, 0, nil) != nil else {
-            throw CacheError.invalidImage
-        }
-        guard let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
-              let width = properties[kCGImagePropertyPixelWidth] as? Int,
-              let height = properties[kCGImagePropertyPixelHeight] as? Int,
-              width > 0,
-              height > 0,
-              width <= Self.maximumPixelCount / height else {
-            throw CacheError.imageTooLarge
-        }
-        guard let typeIdentifier = CGImageSourceGetType(source) as String?,
-              typeIdentifier == UTType.png.identifier
-                || typeIdentifier == UTType.jpeg.identifier else {
-            throw CacheError.unsupportedImageType
+        do {
+        _ = try ImageAssetValidator.validate(data)
+        } catch let error as ImageAssetValidationError {
+            switch error {
+            case .invalidImage: throw CacheError.invalidImage
+            case .unsupportedImageType: throw CacheError.unsupportedImageType
+            case .imageTooLarge: throw CacheError.imageTooLarge
+            }
         }
     }
 }

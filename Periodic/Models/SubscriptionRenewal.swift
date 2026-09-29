@@ -21,7 +21,10 @@ struct SubscriptionRenewalRequest: Sendable {
     let expectedRevision: Int64
     let expectedExpiry: LocalDate
     let cycleMonths: Int
-    let money: Money
+    let quotedMoney: Money
+    let paymentDate: LocalDate
+    let paymentMoney: Money
+    let paymentNote: String
 }
 
 struct SubscriptionNonRenewalRequest: Sendable {

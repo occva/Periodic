@@ -221,14 +221,95 @@ enum AppSchemaV2: VersionedSchema {
     }
 }
 
+enum AppSchemaV3: VersionedSchema {
+    static var versionIdentifier: Schema.Version { Schema.Version(3, 0, 0) }
+
+    static var models: [any PersistentModel.Type] {
+        [
+            SubscriptionRecord.self,
+            SubscriptionPeriodRecord.self,
+            SubscriptionPaymentRecord.self,
+            ServiceTemplateRecord.self,
+            TemplateCategoryRecord.self,
+            BuiltinTemplateCategoryAssignmentRecord.self,
+        ]
+    }
+}
+
+enum AppSchemaV4: VersionedSchema {
+    static var versionIdentifier: Schema.Version { Schema.Version(4, 0, 0) }
+
+    static var models: [any PersistentModel.Type] {
+        [
+            SubscriptionRecord.self,
+            SubscriptionPeriodRecord.self,
+            SubscriptionPaymentRecord.self,
+            SubscriptionPaymentAttachmentRecord.self,
+            ServiceTemplateRecord.self,
+            TemplateCategoryRecord.self,
+            BuiltinTemplateCategoryAssignmentRecord.self,
+        ]
+    }
+}
+
+enum AppSchemaV5: VersionedSchema {
+    static var versionIdentifier: Schema.Version { Schema.Version(5, 0, 0) }
+
+    static var models: [any PersistentModel.Type] {
+        [
+            SubscriptionRecord.self,
+            SubscriptionPeriodRecord.self,
+            SubscriptionPaymentRecord.self,
+            SubscriptionPaymentAttachmentRecord.self,
+            SubscriptionPaymentAttachmentItemRecord.self,
+            ServiceTemplateRecord.self,
+            TemplateCategoryRecord.self,
+            BuiltinTemplateCategoryAssignmentRecord.self,
+        ]
+    }
+}
+
 enum AppSchemaMigrationPlan: SchemaMigrationPlan {
     static var schemas: [any VersionedSchema.Type] {
-        [AppSchemaV1.self, AppSchemaV2.self]
+        [
+            AppSchemaV1.self,
+            AppSchemaV2.self,
+            AppSchemaV3.self,
+            AppSchemaV4.self,
+            AppSchemaV5.self,
+        ]
     }
 
     static var stages: [MigrationStage] {
         [
-            .lightweight(fromVersion: AppSchemaV1.self, toVersion: AppSchemaV2.self)
+            .lightweight(fromVersion: AppSchemaV1.self, toVersion: AppSchemaV2.self),
+            .lightweight(fromVersion: AppSchemaV2.self, toVersion: AppSchemaV3.self),
+            .lightweight(fromVersion: AppSchemaV3.self, toVersion: AppSchemaV4.self),
+            .custom(
+                fromVersion: AppSchemaV4.self,
+                toVersion: AppSchemaV5.self,
+                willMigrate: nil,
+                didMigrate: migratePaymentAttachmentsToOrderedItems
+            ),
         ]
+    }
+
+    private static func migratePaymentAttachmentsToOrderedItems(
+        context: ModelContext
+    ) throws {
+        let legacyAttachments = try context.fetch(
+            FetchDescriptor<SubscriptionPaymentAttachmentRecord>()
+        )
+        for attachment in legacyAttachments {
+            context.insert(
+                SubscriptionPaymentAttachmentItemRecord(
+                    paymentID: attachment.paymentID,
+                    reference: attachment.reference,
+                    sortOrder: 0
+                )
+            )
+            context.delete(attachment)
+        }
+        try context.save()
     }
 }

@@ -9,6 +9,7 @@ enum DataPackageCodec {
         "checksums.json",
         "data/subscriptions.jsonl",
         "data/periods.jsonl",
+        "data/payments.jsonl",
         "data/templates.jsonl",
         "data/categories.jsonl",
         "data/builtin-category-assignments.jsonl",
@@ -36,6 +37,7 @@ enum DataPackageCodec {
             tables: .init(
                 subscriptions: snapshot.subscriptions.count,
                 periods: snapshot.periods.count,
+                payments: snapshot.payments.count,
                 templates: snapshot.templates.count,
                 categories: snapshot.categories.count,
                 builtinCategoryAssignments: snapshot.builtinCategoryAssignments.count
@@ -47,6 +49,7 @@ enum DataPackageCodec {
             "manifest.json": try jsonEncoder().encode(manifest),
             "data/subscriptions.jsonl": try encodeLines(snapshot.subscriptions),
             "data/periods.jsonl": try encodeLines(snapshot.periods),
+            "data/payments.jsonl": try encodeLines(snapshot.payments),
             "data/templates.jsonl": try encodeLines(snapshot.templates),
             "data/categories.jsonl": try encodeLines(snapshot.categories),
             "data/builtin-category-assignments.jsonl": try encodeLines(snapshot.builtinCategoryAssignments),
@@ -103,13 +106,21 @@ enum DataPackageCodec {
             throw DataExchangeError.invalidPackage("日历或导出范围无法识别")
         }
         guard manifest.minimumReaderVersion <= DataPackageManifest.currentVersion,
-              manifest.formatVersion == DataPackageManifest.currentVersion else {
+              (1...DataPackageManifest.currentVersion).contains(manifest.formatVersion) else {
             throw DataExchangeError.unsupportedVersion(manifest.formatVersion)
+        }
+        if manifest.formatVersion >= 2,
+           (files["data/payments.jsonl"] == nil || manifest.tables.payments == nil) {
+            throw DataExchangeError.invalidPackage("数据包缺少消费记录")
         }
 
         let snapshot = DataPackageSnapshot(
             subscriptions: try decodeLines(files["data/subscriptions.jsonl"], as: DataPackageSubscription.self),
             periods: try decodeLines(files["data/periods.jsonl"], as: DataPackagePeriod.self),
+            payments: try decodeLines(
+                files["data/payments.jsonl"],
+                as: DataPackagePayment.self
+            ),
             templates: try decodeLines(files["data/templates.jsonl"], as: DataPackageTemplate.self),
             categories: try decodeLines(files["data/categories.jsonl"], as: DataPackageCategory.self),
             builtinCategoryAssignments: try decodeLines(
@@ -126,6 +137,7 @@ enum DataPackageCodec {
         }
         guard manifest.tables.subscriptions == snapshot.subscriptions.count,
               manifest.tables.periods == snapshot.periods.count,
+              (manifest.tables.payments ?? 0) == snapshot.payments.count,
               manifest.tables.templates == snapshot.templates.count,
               manifest.tables.categories == snapshot.categories.count,
               manifest.tables.builtinCategoryAssignments == snapshot.builtinCategoryAssignments.count else {
@@ -183,12 +195,13 @@ enum DataPackageCodec {
     }
 
     private static func validate(_ snapshot: DataPackageSnapshot) throws {
-        let total = snapshot.subscriptions.count + snapshot.periods.count
+        let total = snapshot.subscriptions.count + snapshot.periods.count + snapshot.payments.count
             + snapshot.templates.count + snapshot.categories.count
             + snapshot.builtinCategoryAssignments.count
         guard total <= maximumRecordCount else { throw DataExchangeError.resourceLimitExceeded }
         try requireUnique(snapshot.subscriptions.map(\.id), table: "subscriptions")
         try requireUnique(snapshot.periods.map(\.id), table: "periods")
+        try requireUnique(snapshot.payments.map(\.id), table: "payments")
         try requireUnique(snapshot.templates.map(\.id), table: "templates")
         try requireUnique(snapshot.categories.map(\.id), table: "categories")
         try requireUnique(snapshot.builtinCategoryAssignments.map(\.templateKey), table: "assignments")
@@ -196,6 +209,18 @@ enum DataPackageCodec {
         let subscriptionIDs = Set(snapshot.subscriptions.map(\.id))
         guard snapshot.periods.allSatisfy({ subscriptionIDs.contains($0.subscriptionID) }) else {
             throw DataExchangeError.invalidRecord("周期缺少包内父订阅")
+        }
+        guard snapshot.payments.allSatisfy({ subscriptionIDs.contains($0.subscriptionID) }) else {
+            throw DataExchangeError.invalidRecord("消费记录缺少包内父订阅")
+        }
+        let periodsByID = Dictionary(uniqueKeysWithValues: snapshot.periods.map { ($0.id, $0) })
+        for payment in snapshot.payments {
+            if let periodID = payment.periodRecordID {
+                guard let period = periodsByID[periodID],
+                      period.subscriptionID == payment.subscriptionID else {
+                    throw DataExchangeError.invalidRecord("消费记录关联了无效周期")
+                }
+            }
         }
         let categoryIDs = Set(snapshot.categories.map(\.id))
         guard snapshot.templates.compactMap(\.customCategoryID).allSatisfy(categoryIDs.contains),
@@ -258,6 +283,23 @@ enum DataPackageCodec {
                 }
             }
         }
+        for value in snapshot.payments {
+            let hasCompleteSnapshot = (value.periodStart == nil) == (value.periodEnd == nil)
+            guard value.recordVersion == 1,
+                  value.currency.scale == value.currencyScale,
+                  value.amountMinor >= 0,
+                  value.paymentDate <= .today,
+                  hasCompleteSnapshot,
+                  value.kind != .renewal || value.periodStart != nil,
+                  value.periodStart.map({ start in
+                      value.periodEnd.map { start <= $0 } ?? false
+                  }) ?? true,
+                  value.attachmentAssetIDs.allSatisfy(isValidAssetIdentifier),
+                  PaymentAttachmentReference.removingDuplicates(value.attachmentAssetIDs)
+                    == value.attachmentAssetIDs else {
+                throw DataExchangeError.invalidRecord("消费记录的金额、日期或版本无效")
+            }
+        }
         guard snapshot.templates.allSatisfy({
             $0.recordVersion == 1
                 && $0.currency.scale == $0.currencyScale
@@ -304,9 +346,14 @@ enum DataPackageCodec {
     ) throws {
         let referencedAssets = Set(snapshot.subscriptions.compactMap(\.iconAssetID))
             .union(snapshot.templates.compactMap(\.iconAssetID))
+            .union(snapshot.payments.flatMap(\.attachmentAssetIDs))
         guard referencedAssets == assetIdentifiers else {
             throw DataExchangeError.invalidPackage("图片文件与记录引用不一致")
         }
+    }
+
+    private static func isValidAssetIdentifier(_ identifier: String) -> Bool {
+        identifier.count == 64 && identifier.allSatisfy(\.isHexDigit)
     }
 
     private static func requireUnique<T: Hashable>(_ values: [T], table: String) throws {

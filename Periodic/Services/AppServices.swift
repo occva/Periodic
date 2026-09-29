@@ -12,6 +12,7 @@ final class AppServices {
     let templateCategoryStore: TemplateCategoryStore?
     let appleIconSearch: AppleIconSearchClient
     let appleIconCache: AppleIconCache
+    let paymentAttachmentStore: PaymentAttachmentStore
     let exchangeRates: FrankfurterExchangeRateClient
     let subscriptionNotifications: SubscriptionNotificationService
     let dataExchange: DataExchangeService?
@@ -30,6 +31,7 @@ final class AppServices {
         persistence: PersistenceController = PersistenceController(),
         inMemory: Bool? = nil,
         appleIconCache: AppleIconCache? = nil,
+        paymentAttachmentStore: PaymentAttachmentStore? = nil,
         defaults: UserDefaults = .standard
     ) {
         let processArguments = ProcessInfo.processInfo.arguments
@@ -39,11 +41,17 @@ final class AppServices {
         let resolvedAppleIconCache = appleIconCache ?? AppleIconCache(
             storageRoot: Self.defaultIconStorageRoot(useMemoryStore: useMemoryStore)
         )
+        let resolvedPaymentAttachmentStore = paymentAttachmentStore ?? PaymentAttachmentStore(
+            storageRoot: Self.defaultPaymentAttachmentStorageRoot(
+                useMemoryStore: useMemoryStore
+            )
+        )
         self.persistence = persistence
         self.defaults = defaults
         usesPersistentStore = !useMemoryStore
         appleIconSearch = AppleIconSearchClient()
         self.appleIconCache = resolvedAppleIconCache
+        self.paymentAttachmentStore = resolvedPaymentAttachmentStore
         exchangeRates = FrankfurterExchangeRateClient()
         subscriptionNotifications = SubscriptionNotificationService(
             isSystemIntegrationEnabled: !useMemoryStore || enablesSampleNotifications,
@@ -61,7 +69,7 @@ final class AppServices {
             builtinTemplateError = PresentedError(error, title: "无法读取内置模板")
         }
         do {
-            let schema = Schema(versionedSchema: AppSchemaV2.self)
+            let schema = Schema(versionedSchema: AppSchemaV5.self)
             let container = try persistence.makeContainer(
                 schema: schema,
                 migrationPlan: AppSchemaMigrationPlan.self,
@@ -74,7 +82,8 @@ final class AppServices {
             builtinTemplateCategoryStore = BuiltinTemplateCategoryStore(modelContainer: container)
             dataExchange = DataExchangeService(
                 store: DataExchangeStore(modelContainer: container),
-                iconCache: resolvedAppleIconCache
+                iconCache: resolvedAppleIconCache,
+                paymentAttachmentStore: resolvedPaymentAttachmentStore
             )
         } catch {
             modelContainer = nil
@@ -123,6 +132,8 @@ final class AppServices {
             defaults.set(true, forKey: backfillKey)
         }
         await retryPendingIconCleanup()
+        await retryPendingPaymentAttachmentCleanup()
+        await removeOrphanedPaymentAttachments()
     }
 
     func notifySubscriptionDataChanged() {
@@ -146,6 +157,7 @@ final class AppServices {
         guard let subscriptionStore else { throw AppServicesError.storeUnavailable }
         let result = try await subscriptionStore.delete(preview)
         let pendingIconCleanupCount: Int
+        let pendingPaymentAttachmentCleanupCount: Int
         if usesPersistentStore {
             let queuedReferences = pendingIconCleanupReferences.union(
                 result.unreferencedIconReferences
@@ -153,14 +165,85 @@ final class AppServices {
             storePendingIconCleanupReferences(queuedReferences)
             await retryPendingIconCleanup()
             pendingIconCleanupCount = pendingIconCleanupReferences.count
+            let queuedAttachmentReferences = pendingPaymentAttachmentCleanupReferences.union(
+                result.unreferencedPaymentAttachmentReferences
+            )
+            storePendingPaymentAttachmentCleanupReferences(queuedAttachmentReferences)
+            await retryPendingPaymentAttachmentCleanup()
+            pendingPaymentAttachmentCleanupCount =
+                pendingPaymentAttachmentCleanupReferences.count
         } else {
             pendingIconCleanupCount = await appleIconCache.removeStoredImages(
                 references: result.unreferencedIconReferences
             ).count
+            pendingPaymentAttachmentCleanupCount = await paymentAttachmentStore
+                .removeStoredImages(
+                    references: result.unreferencedPaymentAttachmentReferences
+                ).count
         }
         notifySubscriptionDataChanged()
         return SubscriptionDeletionOutcome(
-            pendingIconCleanupCount: pendingIconCleanupCount
+            pendingIconCleanupCount: pendingIconCleanupCount,
+            pendingPaymentAttachmentCleanupCount: pendingPaymentAttachmentCleanupCount
+        )
+    }
+
+    func addPayment(_ input: SubscriptionPaymentAddInput) async throws {
+        guard let subscriptionStore else { throw AppServicesError.storeUnavailable }
+        try await subscriptionStore.addPayment(input)
+        notifySubscriptionDataChanged()
+    }
+
+    func updatePayment(_ input: SubscriptionPaymentUpdateInput) async throws {
+        guard let subscriptionStore else { throw AppServicesError.storeUnavailable }
+        try await subscriptionStore.updatePayment(input)
+        await cleanPaymentAttachments(
+            candidates: Set(input.original.attachmentReferences)
+        )
+        notifySubscriptionDataChanged()
+    }
+
+    func deletePayment(_ input: SubscriptionPaymentDeleteInput) async throws {
+        guard let subscriptionStore else { throw AppServicesError.storeUnavailable }
+        try await subscriptionStore.deletePayment(input)
+        await cleanPaymentAttachments(
+            candidates: Set(input.original.attachmentReferences)
+        )
+        notifySubscriptionDataChanged()
+    }
+
+    func discardUncommittedPaymentAttachments(
+        _ writes: [PaymentAttachmentStore.ImportedImageWrite],
+        keeping additionalReferences: Set<String> = []
+    ) async {
+        guard let subscriptionStore else {
+            await paymentAttachmentStore.releaseImportedImages(writes)
+            return
+        }
+        do {
+            let referenced = try await subscriptionStore
+                .referencedPaymentAttachmentReferences()
+            await paymentAttachmentStore.discardImportedImages(
+                writes,
+                keeping: referenced.union(additionalReferences)
+            )
+        } catch {
+            // Retain the file if current database references cannot be read.
+            await paymentAttachmentStore.releaseImportedImages(writes)
+            AppLog.persistence.error("Failed to verify an uncommitted payment attachment")
+        }
+    }
+
+    func finalizeCommittedPaymentAttachments(
+        _ writes: [PaymentAttachmentStore.ImportedImageWrite],
+        retainedReferences: Set<String>
+    ) async {
+        let retainedWrites = writes.filter { retainedReferences.contains($0.reference) }
+        let discardedWrites = writes.filter { !retainedReferences.contains($0.reference) }
+        await paymentAttachmentStore.releaseImportedImages(retainedWrites)
+        await discardUncommittedPaymentAttachments(
+            discardedWrites,
+            keeping: retainedReferences
         )
     }
 
@@ -239,6 +322,17 @@ final class AppServices {
             .appending(path: UUID().uuidString, directoryHint: .isDirectory)
     }
 
+    static func defaultPaymentAttachmentStorageRoot(
+        useMemoryStore: Bool,
+        temporaryDirectory: URL = FileManager.default.temporaryDirectory
+    ) -> URL? {
+        guard useMemoryStore else { return nil }
+        return temporaryDirectory
+            .appending(path: "Periodic", directoryHint: .isDirectory)
+            .appending(path: "InMemoryPaymentAttachments", directoryHint: .isDirectory)
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+    }
+
     private var pendingIconCleanupReferences: Set<String> {
         Set(defaults.stringArray(forKey: PreferenceKey.pendingIconCleanupReferences) ?? [])
     }
@@ -266,6 +360,82 @@ final class AppServices {
             storePendingIconCleanupReferences(failures)
         } catch {
             AppLog.persistence.error("Failed to retry subscription icon cleanup")
+        }
+    }
+
+    private var pendingPaymentAttachmentCleanupReferences: Set<String> {
+        Set(
+            defaults.stringArray(
+                forKey: PreferenceKey.pendingPaymentAttachmentCleanupReferences
+            ) ?? []
+        )
+    }
+
+    private func storePendingPaymentAttachmentCleanupReferences(
+        _ references: Set<String>
+    ) {
+        if references.isEmpty {
+            defaults.removeObject(
+                forKey: PreferenceKey.pendingPaymentAttachmentCleanupReferences
+            )
+        } else {
+            defaults.set(
+                references.sorted(),
+                forKey: PreferenceKey.pendingPaymentAttachmentCleanupReferences
+            )
+        }
+    }
+
+    private func cleanPaymentAttachments(candidates: Set<String>) async {
+        guard !candidates.isEmpty, let subscriptionStore else { return }
+        if usesPersistentStore {
+            storePendingPaymentAttachmentCleanupReferences(
+                pendingPaymentAttachmentCleanupReferences.union(candidates)
+            )
+            await retryPendingPaymentAttachmentCleanup()
+            return
+        }
+        do {
+            let referenced = try await subscriptionStore
+                .referencedPaymentAttachmentReferences()
+            _ = await paymentAttachmentStore.removeStoredImages(
+                references: candidates.subtracting(referenced)
+            )
+        } catch {
+            AppLog.persistence.error("Failed to clean payment attachments")
+        }
+    }
+
+    private func retryPendingPaymentAttachmentCleanup() async {
+        let pendingReferences = pendingPaymentAttachmentCleanupReferences
+        guard !pendingReferences.isEmpty, let subscriptionStore else { return }
+        do {
+            let referenced = try await subscriptionStore
+                .referencedPaymentAttachmentReferences()
+            let failures = await paymentAttachmentStore.removeStoredImages(
+                references: pendingReferences.subtracting(referenced)
+            )
+            storePendingPaymentAttachmentCleanupReferences(failures)
+        } catch {
+            AppLog.persistence.error("Failed to retry payment attachment cleanup")
+        }
+    }
+
+    private func removeOrphanedPaymentAttachments() async {
+        guard let subscriptionStore else { return }
+        do {
+            let referenced = try await subscriptionStore
+                .referencedPaymentAttachmentReferences()
+            let failures = await paymentAttachmentStore.removeUnreferencedImages(
+                keeping: referenced,
+                modifiedBefore: Date().addingTimeInterval(-24 * 60 * 60)
+            )
+            guard !failures.isEmpty else { return }
+            storePendingPaymentAttachmentCleanupReferences(
+                pendingPaymentAttachmentCleanupReferences.union(failures)
+            )
+        } catch {
+            AppLog.persistence.error("Failed to reconcile stored payment attachments")
         }
     }
 }
