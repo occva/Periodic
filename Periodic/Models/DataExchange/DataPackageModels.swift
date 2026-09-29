@@ -62,6 +62,8 @@ struct DataPackageSubscription: Codable, Equatable, Sendable, Identifiable {
     let currencyScale: Int
     let note: String
     let reminderEnabled: Bool
+    let reminderAdvanceDays: [Int]?
+    let reminderMinuteOfDay: Int?
     let automaticallyRenews: Bool
     let revision: Int64
     let createdAt: Date
@@ -84,7 +86,19 @@ struct DataPackageSubscription: Codable, Equatable, Sendable, Identifiable {
             && lhs.currencyScale == rhs.currencyScale
             && lhs.note == rhs.note
             && lhs.reminderEnabled == rhs.reminderEnabled
+            && lhs.normalizedReminderAdvanceDays == rhs.normalizedReminderAdvanceDays
+            && lhs.normalizedReminderMinuteOfDay == rhs.normalizedReminderMinuteOfDay
             && lhs.automaticallyRenews == rhs.automaticallyRenews
+    }
+
+    private var normalizedReminderAdvanceDays: [Int] {
+        SubscriptionNotificationSchedule.normalizedAdvanceDays(
+            reminderAdvanceDays ?? SubscriptionNotificationSchedule.defaultAdvanceDays
+        )
+    }
+
+    private var normalizedReminderMinuteOfDay: Int {
+        reminderMinuteOfDay ?? SubscriptionNotificationSchedule.defaultMinuteOfDay
     }
 }
 
@@ -191,6 +205,28 @@ struct DataPackageSettings: Codable, Equatable, Sendable {
     let menuBarDueHorizon: Int
     let menuBarShowsForecasts: Bool
     let exchangeRateBaseCurrency: String?
+
+    init(
+        appearance: String?,
+        language: String?,
+        defaultCurrency: String?,
+        selectedCurrencies: String?,
+        usesCurrencySymbols: Bool,
+        menuBarEnabled: Bool,
+        menuBarDueHorizon: Int,
+        menuBarShowsForecasts: Bool,
+        exchangeRateBaseCurrency: String?
+    ) {
+        self.appearance = appearance
+        self.language = language
+        self.defaultCurrency = defaultCurrency
+        self.selectedCurrencies = selectedCurrencies
+        self.usesCurrencySymbols = usesCurrencySymbols
+        self.menuBarEnabled = menuBarEnabled
+        self.menuBarDueHorizon = menuBarDueHorizon
+        self.menuBarShowsForecasts = menuBarShowsForecasts
+        self.exchangeRateBaseCurrency = exchangeRateBaseCurrency
+    }
 }
 
 struct EncodedDataPackage: Sendable {

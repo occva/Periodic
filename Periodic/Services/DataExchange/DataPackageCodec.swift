@@ -228,6 +228,17 @@ enum DataPackageCodec {
                     throw DataExchangeError.invalidRecord("自动续费字段组合无效")
                 }
             }
+            if let advanceDays = value.reminderAdvanceDays {
+                guard !advanceDays.isEmpty,
+                      advanceDays.allSatisfy({ $0 >= 0 }),
+                      Set(advanceDays).count == advanceDays.count else {
+                    throw DataExchangeError.invalidRecord("订阅提醒日期无效")
+                }
+            }
+            if let minuteOfDay = value.reminderMinuteOfDay,
+               !(0...(23 * 60 + 59)).contains(minuteOfDay) {
+                throw DataExchangeError.invalidRecord("订阅提醒时间无效")
+            }
         }
         for value in snapshot.periods {
             guard value.recordVersion == 1,

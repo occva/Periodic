@@ -60,6 +60,9 @@ case "$MODE" in
     exit 1
     ;;
   --sample-data)
-    /usr/bin/open -n "$APP_BUNDLE" --args -store-in-memory -seed-test-data
+    /usr/bin/open -n "$APP_BUNDLE" --args \
+      -store-in-memory \
+      -seed-test-data \
+      -enable-test-notifications
     ;;
 esac

@@ -37,6 +37,12 @@ enum AppLocalization {
         activeBundle.localizedString(forKey: key, value: key, table: nil)
     }
 
+    static var activeLanguageIdentifier: String {
+        let rawValue = UserDefaults.standard.string(forKey: PreferenceKey.language)
+        let language = rawValue.flatMap(AppLanguage.init(rawValue:)) ?? .system
+        return language.localizationCode ?? Locale.autoupdatingCurrent.identifier
+    }
+
     private static var activeBundle: Bundle {
         let rawValue = UserDefaults.standard.string(forKey: PreferenceKey.language)
         let language = rawValue.flatMap(AppLanguage.init(rawValue:)) ?? .system
@@ -51,7 +57,10 @@ enum AppLocalization {
 
 enum AppPreferenceValues {
     static var datasetID: UUID {
-        let defaults = UserDefaults.standard
+        datasetID(in: .standard)
+    }
+
+    static func datasetID(in defaults: UserDefaults) -> UUID {
         if let rawValue = defaults.string(forKey: PreferenceKey.datasetID),
            let value = UUID(uuidString: rawValue) {
             return value

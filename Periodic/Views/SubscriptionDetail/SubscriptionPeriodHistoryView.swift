@@ -25,7 +25,7 @@ struct SubscriptionPeriodHistoryView: View {
             } description: {
                 Text("周期订阅具有完整开始和结束日期时会记录首次周期，也可以手动添加记录。")
             } actions: {
-                Button("添加记录", systemImage: "plus", action: onCreate)
+                Button("添加记录", action: onCreate)
                     .buttonStyle(.glass)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -67,7 +67,7 @@ struct SubscriptionPeriodHistoryView: View {
                     .labelsHidden()
                     .controlSize(.small)
                 } else {
-                    editableText(row.period?.start.displayText ?? "—", row: row)
+                    editableText(row.startTitle, row: row)
                 }
             }
             .width(min: 120, ideal: 145)
@@ -143,40 +143,28 @@ struct SubscriptionPeriodHistoryView: View {
     private func actions(for row: SubscriptionPeriodRow) -> some View {
         if isEditing(row) {
             HStack(spacing: 6) {
-                Button {
-                    onSave()
-                } label: {
-                    Label("保存", systemImage: "checkmark")
-                }
-                .labelStyle(.iconOnly)
+                Button("保存", action: onSave)
                 .buttonStyle(.plain)
                 .keyboardShortcut(.return, modifiers: .command)
                 .disabled(isSaving)
                 .help("保存修改")
 
-                Button {
-                    onCancel()
-                } label: {
-                    Label("取消", systemImage: "xmark")
-                }
-                .labelStyle(.iconOnly)
+                Button("取消", action: onCancel)
                 .buttonStyle(.plain)
                 .disabled(isSaving)
                 .help("取消修改")
             }
         } else if let period = row.period {
             HStack(spacing: 8) {
-                Button("编辑", systemImage: "pencil") {
+                Button("编辑") {
                     onEdit(period)
                 }
-                .labelStyle(.iconOnly)
                 .buttonStyle(.plain)
                 .help("编辑周期记录")
 
-                Button("删除", systemImage: "trash", role: .destructive) {
+                Button("删除", role: .destructive) {
                     onDelete(period)
                 }
-                .labelStyle(.iconOnly)
                 .buttonStyle(.plain)
                 .help("删除周期记录")
             }

@@ -9,10 +9,8 @@ final class PeriodicUITests: XCTestCase {
         app.launch()
         defer { app.terminate() }
 
-        XCTAssertTrue(app.descendants(matching: .any)["dashboard-page"].waitForExistence(timeout: 10))
-        let settings = app.buttons["open-settings"]
-        XCTAssertTrue(settings.waitForExistence(timeout: 5))
-        settings.click()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
+        app.typeKey(",", modifierFlags: .command)
         XCTAssertTrue(app.popUpButtons["appearance-picker"].waitForExistence(timeout: 5))
     }
 
@@ -23,8 +21,9 @@ final class PeriodicUITests: XCTestCase {
         app.launch()
         defer { app.terminate() }
 
-        XCTAssertTrue(app.descendants(matching: .any)["dashboard-page"].waitForExistence(timeout: 10))
-        app.descendants(matching: .any)["destination-templates"].click()
+        let templatesDestination = app.descendants(matching: .any)["destination-templates"]
+        XCTAssertTrue(templatesDestination.waitForExistence(timeout: 10))
+        templatesDestination.click()
 
         let templateSidebar = app.descendants(matching: .any)["template-library-sidebar"]
         XCTAssertTrue(templateSidebar.waitForExistence(timeout: 5))
@@ -41,7 +40,10 @@ final class PeriodicUITests: XCTestCase {
         app.launch()
         defer { app.terminate() }
 
-        XCTAssertTrue(app.descendants(matching: .any)["dashboard-page"].waitForExistence(timeout: 10))
+        let dashboardDestination = app.descendants(matching: .any)["destination-dashboard"]
+        XCTAssertTrue(dashboardDestination.waitForExistence(timeout: 10))
+        dashboardDestination.click()
+        XCTAssertTrue(app.descendants(matching: .any)["dashboard-page"].waitForExistence(timeout: 5))
         let destinations = app.descendants(matching: .any)
             .matching(identifier: "destination-overview")
         XCTAssertEqual(destinations.count, 1)
@@ -69,8 +71,9 @@ final class PeriodicUITests: XCTestCase {
         app.launch()
         defer { app.terminate() }
 
-        XCTAssertTrue(app.descendants(matching: .any)["dashboard-page"].waitForExistence(timeout: 10))
-        app.descendants(matching: .any)["destination-overview"].click()
+        let overviewDestination = app.descendants(matching: .any)["destination-overview"]
+        XCTAssertTrue(overviewDestination.waitForExistence(timeout: 10))
+        overviewDestination.click()
         XCTAssertTrue(app.descendants(matching: .any)["overview-page"].waitForExistence(timeout: 5))
         app.typeKey("n", modifierFlags: .command)
 
@@ -107,7 +110,7 @@ final class PeriodicUITests: XCTestCase {
         app.launch()
         defer { app.terminate() }
 
-        XCTAssertTrue(app.descendants(matching: .any)["dashboard-page"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["open-settings"].waitForExistence(timeout: 10))
         app.typeKey("n", modifierFlags: .command)
 
         let appleSearchButton = app.buttons["search-apple-icon"]
@@ -127,7 +130,10 @@ final class PeriodicUITests: XCTestCase {
         app.launch()
         defer { app.terminate() }
 
-        XCTAssertTrue(app.descendants(matching: .any)["dashboard-page"].waitForExistence(timeout: 10))
+        let dashboardDestination = app.descendants(matching: .any)["destination-dashboard"]
+        XCTAssertTrue(dashboardDestination.waitForExistence(timeout: 10))
+        dashboardDestination.click()
+        XCTAssertTrue(app.descendants(matching: .any)["dashboard-page"].waitForExistence(timeout: 5))
         app.typeKey("n", modifierFlags: [.command, .shift])
 
         let dashboards = app.descendants(matching: .any).matching(identifier: "dashboard-page")

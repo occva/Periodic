@@ -150,6 +150,35 @@ actor AppleIconCache {
         }
     }
 
+    func removeStoredImages(references: Set<String>) -> Set<String> {
+        var failedReferences = Set<String>()
+        for reference in references {
+            let key: String
+            if reference.hasPrefix(Self.referencePrefix) {
+                key = String(reference.dropFirst(Self.referencePrefix.count))
+            } else if reference.hasPrefix(Self.localReferencePrefix) {
+                key = String(reference.dropFirst(Self.localReferencePrefix.count))
+            } else {
+                continue
+            }
+            do {
+                try validateCacheKey(key)
+                let directory = reference.hasPrefix(Self.referencePrefix)
+                    ? try storedIconDirectory()
+                    : try storedLocalIconDirectory()
+                try fileManager.removeItem(
+                    at: directory.appending(path: key).appendingPathExtension("image")
+                )
+            } catch {
+                if (error as NSError).code != NSFileNoSuchFileError {
+                    failedReferences.insert(reference)
+                    AppLog.persistence.error("Failed to remove an unreferenced subscription icon")
+                }
+            }
+        }
+        return failedReferences
+    }
+
     func validateImportedImage(_ data: Data) throws {
         guard data.count <= Self.maximumImageSize else {
             throw CacheError.imageTooLarge

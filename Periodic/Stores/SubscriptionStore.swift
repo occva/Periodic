@@ -44,10 +44,14 @@ actor SubscriptionStore {
         return subscriptions
     }
 
-    func create(_ input: SubscriptionCreateInput) throws -> UUID {
+    func create(
+        _ input: SubscriptionCreateInput,
+        historyPolicy: SubscriptionCreationHistoryPolicy = .recordInitialPeriod
+    ) throws -> UUID {
         try commit {
             modelContext.insert(SubscriptionRecord(input: input))
-            if let period = initialPeriod(for: input) {
+            if historyPolicy == .recordInitialPeriod,
+               let period = initialPeriod(for: input) {
                 modelContext.insert(SubscriptionPeriodRecord(input: period))
             }
             return input.id
@@ -155,6 +159,95 @@ actor SubscriptionStore {
             let period = try period(matching: input.original)
             modelContext.delete(period)
             subscription.markHistoryChanged()
+        }
+    }
+
+    func previewDeletion(_ targets: [SubscriptionMutationTarget]) throws -> SubscriptionDeletionPreview {
+        let uniqueTargets = Dictionary(targets.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            .values
+            .sorted { $0.id.uuidString < $1.id.uuidString }
+        guard !uniqueTargets.isEmpty else {
+            return SubscriptionDeletionPreview(targets: [], subscriptionCount: 0, periodCount: 0)
+        }
+        let records = try modelContext.fetch(FetchDescriptor<SubscriptionRecord>())
+        let recordsByID = Dictionary(uniqueKeysWithValues: records.map { ($0.id, $0) })
+        for target in uniqueTargets {
+            guard let record = recordsByID[target.id] else { throw StoreError.notFound }
+            guard record.revision == target.expectedRevision else {
+                throw StoreError.revisionConflict
+            }
+        }
+        let targetIDs = Set(uniqueTargets.map(\.id))
+        let periodCount = try modelContext.fetch(FetchDescriptor<SubscriptionPeriodRecord>())
+            .count { targetIDs.contains($0.subscriptionID) }
+        return SubscriptionDeletionPreview(
+            targets: uniqueTargets,
+            subscriptionCount: uniqueTargets.count,
+            periodCount: periodCount
+        )
+    }
+
+    func delete(_ preview: SubscriptionDeletionPreview) throws -> SubscriptionDeletionResult {
+        try commit {
+            let records = try modelContext.fetch(FetchDescriptor<SubscriptionRecord>())
+            let recordsByID = Dictionary(uniqueKeysWithValues: records.map { ($0.id, $0) })
+            let targetIDs = Set(preview.targets.map(\.id))
+            var targets: [SubscriptionRecord] = []
+            for target in preview.targets {
+                guard let record = recordsByID[target.id] else { throw StoreError.notFound }
+                guard record.revision == target.expectedRevision else {
+                    throw StoreError.revisionConflict
+                }
+                targets.append(record)
+            }
+            let periods = try modelContext.fetch(FetchDescriptor<SubscriptionPeriodRecord>())
+                .filter { targetIDs.contains($0.subscriptionID) }
+            guard targets.count == preview.subscriptionCount,
+                  periods.count == preview.periodCount else {
+                throw StoreError.revisionConflict
+            }
+
+            let candidateIconReferences = Set(targets.compactMap(\.iconURLString))
+            for period in periods { modelContext.delete(period) }
+            for target in targets { modelContext.delete(target) }
+
+            let remainingSubscriptionReferences = Set(
+                records
+                    .filter { !targetIDs.contains($0.id) }
+                    .compactMap(\.iconURLString)
+            )
+            let templateReferences = Set(
+                try modelContext.fetch(FetchDescriptor<ServiceTemplateRecord>())
+                    .compactMap(\.iconURLString)
+            )
+            return SubscriptionDeletionResult(
+                deletedSubscriptionCount: targets.count,
+                deletedPeriodCount: periods.count,
+                unreferencedIconReferences: candidateIconReferences
+                    .subtracting(remainingSubscriptionReferences)
+                    .subtracting(templateReferences)
+            )
+        }
+    }
+
+    func setManagementState(
+        _ state: ManagementState,
+        for targets: [SubscriptionMutationTarget]
+    ) throws {
+        try commit {
+            let uniqueTargets = Dictionary(
+                targets.map { ($0.id, $0) },
+                uniquingKeysWith: { first, _ in first }
+            ).values
+            let records = try modelContext.fetch(FetchDescriptor<SubscriptionRecord>())
+            let recordsByID = Dictionary(uniqueKeysWithValues: records.map { ($0.id, $0) })
+            for target in uniqueTargets {
+                guard let record = recordsByID[target.id] else { throw StoreError.notFound }
+                guard record.revision == target.expectedRevision else {
+                    throw StoreError.revisionConflict
+                }
+                record.setManagementState(state)
+            }
         }
     }
 
@@ -358,6 +451,10 @@ actor SubscriptionStore {
             money: Money(minorUnits: record.periodAmountMinor, currency: currency),
             note: record.note,
             reminderEnabled: record.reminderEnabled,
+            reminderAdvanceDays: SubscriptionNotificationSchedule.advanceDays(
+                from: record.reminderAdvanceDaysRaw
+            ),
+            reminderMinuteOfDay: record.reminderMinuteOfDay,
             automaticallyRenews: record.automaticallyRenews,
             revision: record.revision,
             createdAt: record.createdAt,

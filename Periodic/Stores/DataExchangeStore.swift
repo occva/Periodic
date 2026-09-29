@@ -25,6 +25,10 @@ actor DataExchangeStore {
                     currencyScale: record.currencyScale,
                     note: record.note,
                     reminderEnabled: record.reminderEnabled,
+                    reminderAdvanceDays: SubscriptionNotificationSchedule.advanceDays(
+                        from: record.reminderAdvanceDaysRaw
+                    ),
+                    reminderMinuteOfDay: record.reminderMinuteOfDay,
                     automaticallyRenews: record.automaticallyRenews,
                     revision: record.revision,
                     createdAt: record.createdAt,
@@ -319,6 +323,14 @@ actor DataExchangeStore {
         record.currencyScale = value.currencyScale
         record.note = value.note
         record.reminderEnabled = value.reminderEnabled
+        record.reminderAdvanceDaysRaw = SubscriptionNotificationSchedule.storedAdvanceDays(
+            value.reminderAdvanceDays
+                ?? SubscriptionNotificationSchedule.defaultAdvanceDays
+        )
+        record.reminderMinuteOfDay = SubscriptionNotificationSchedule.normalizedMinuteOfDay(
+            value.reminderMinuteOfDay
+                ?? SubscriptionNotificationSchedule.defaultMinuteOfDay
+        )
         record.automaticallyRenews = value.automaticallyRenews
         record.revision = max(record.revision + 1, 1)
         record.updatedAt = .now
@@ -340,6 +352,10 @@ actor DataExchangeStore {
             money: Money(minorUnits: value.amountMinor, currency: value.currency),
             note: value.note,
             reminderEnabled: value.reminderEnabled,
+            reminderAdvanceDays: value.reminderAdvanceDays
+                ?? SubscriptionNotificationSchedule.defaultAdvanceDays,
+            reminderMinuteOfDay: value.reminderMinuteOfDay
+                ?? SubscriptionNotificationSchedule.defaultMinuteOfDay,
             automaticallyRenews: value.automaticallyRenews
         )
     }

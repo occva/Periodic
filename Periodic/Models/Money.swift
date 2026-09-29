@@ -112,7 +112,7 @@ struct Money: Hashable, Codable, Sendable {
         formattedDecimal(amount, scale: currency.scale)
     }
 
-    private var decimalValue: Decimal {
+    var decimalValue: Decimal {
         Decimal(minorUnits) / decimalPower(currency.scale)
     }
 }

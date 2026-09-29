@@ -23,18 +23,36 @@ final class AppServices {
     private(set) var subscriptionDataVersion = 0
     private(set) var templateDataVersion = 0
     private var didPrepareDevelopmentData = false
+    private let defaults: UserDefaults
+    private let usesPersistentStore: Bool
 
     init(
         persistence: PersistenceController = PersistenceController(),
-        inMemory: Bool? = nil
+        inMemory: Bool? = nil,
+        appleIconCache: AppleIconCache? = nil,
+        defaults: UserDefaults = .standard
     ) {
-        let useMemoryStore = inMemory ?? ProcessInfo.processInfo.arguments.contains("-store-in-memory")
+        let processArguments = ProcessInfo.processInfo.arguments
+        let useMemoryStore = inMemory ?? processArguments.contains("-store-in-memory")
+        let enablesSampleNotifications = useMemoryStore
+            && processArguments.contains("-enable-test-notifications")
+        let resolvedAppleIconCache = appleIconCache ?? AppleIconCache(
+            storageRoot: Self.defaultIconStorageRoot(useMemoryStore: useMemoryStore)
+        )
         self.persistence = persistence
+        self.defaults = defaults
+        usesPersistentStore = !useMemoryStore
         appleIconSearch = AppleIconSearchClient()
-        appleIconCache = AppleIconCache()
+        self.appleIconCache = resolvedAppleIconCache
         exchangeRates = FrankfurterExchangeRateClient()
         subscriptionNotifications = SubscriptionNotificationService(
-            isSystemIntegrationEnabled: !useMemoryStore
+            isSystemIntegrationEnabled: !useMemoryStore || enablesSampleNotifications,
+            defaults: defaults,
+            submissionHistoryKey: useMemoryStore
+                ? PreferenceKey.submittedSampleNotificationRequests
+                : PreferenceKey.submittedNotificationRequests,
+            namespace: useMemoryStore ? .sample : .production,
+            obsoleteNamespaces: useMemoryStore ? [] : [.sample]
         )
         do {
             builtinTemplates = try BuiltinTemplateCatalog.load()
@@ -43,14 +61,12 @@ final class AppServices {
             builtinTemplateError = PresentedError(error, title: "无法读取内置模板")
         }
         do {
-            let schema = Schema([
-                SubscriptionRecord.self,
-                SubscriptionPeriodRecord.self,
-                ServiceTemplateRecord.self,
-                TemplateCategoryRecord.self,
-                BuiltinTemplateCategoryAssignmentRecord.self,
-            ])
-            let container = try persistence.makeContainer(schema: schema, inMemory: useMemoryStore)
+            let schema = Schema(versionedSchema: AppSchemaV2.self)
+            let container = try persistence.makeContainer(
+                schema: schema,
+                migrationPlan: AppSchemaMigrationPlan.self,
+                inMemory: useMemoryStore
+            )
             modelContainer = container
             subscriptionStore = SubscriptionStore(modelContainer: container)
             templateStore = TemplateStore(modelContainer: container)
@@ -58,7 +74,7 @@ final class AppServices {
             builtinTemplateCategoryStore = BuiltinTemplateCategoryStore(modelContainer: container)
             dataExchange = DataExchangeService(
                 store: DataExchangeStore(modelContainer: container),
-                iconCache: appleIconCache
+                iconCache: resolvedAppleIconCache
             )
         } catch {
             modelContainer = nil
@@ -97,8 +113,16 @@ final class AppServices {
     }
 
     func prepareStoredSubscriptionData() async throws {
-        guard let subscriptionStore else { return }
-        _ = try await subscriptionStore.backfillLifetimePeriods()
+        guard usesPersistentStore, let subscriptionStore else { return }
+        let datasetID = AppPreferenceValues.datasetID(in: defaults)
+        let backfillKey = PreferenceKey.lifetimePeriodBackfillCompleted(
+            datasetID: datasetID
+        )
+        if !defaults.bool(forKey: backfillKey) {
+            _ = try await subscriptionStore.backfillLifetimePeriods()
+            defaults.set(true, forKey: backfillKey)
+        }
+        await retryPendingIconCleanup()
     }
 
     func notifySubscriptionDataChanged() {
@@ -107,6 +131,75 @@ final class AppServices {
 
     func notifyTemplateDataChanged() {
         templateDataVersion &+= 1
+    }
+
+    func previewSubscriptionDeletion(
+        targets: [SubscriptionMutationTarget]
+    ) async throws -> SubscriptionDeletionPreview {
+        guard let subscriptionStore else { throw AppServicesError.storeUnavailable }
+        return try await subscriptionStore.previewDeletion(targets)
+    }
+
+    func deleteSubscriptions(
+        _ preview: SubscriptionDeletionPreview
+    ) async throws -> SubscriptionDeletionOutcome {
+        guard let subscriptionStore else { throw AppServicesError.storeUnavailable }
+        let result = try await subscriptionStore.delete(preview)
+        let pendingIconCleanupCount: Int
+        if usesPersistentStore {
+            let queuedReferences = pendingIconCleanupReferences.union(
+                result.unreferencedIconReferences
+            )
+            storePendingIconCleanupReferences(queuedReferences)
+            await retryPendingIconCleanup()
+            pendingIconCleanupCount = pendingIconCleanupReferences.count
+        } else {
+            pendingIconCleanupCount = await appleIconCache.removeStoredImages(
+                references: result.unreferencedIconReferences
+            ).count
+        }
+        notifySubscriptionDataChanged()
+        return SubscriptionDeletionOutcome(
+            pendingIconCleanupCount: pendingIconCleanupCount
+        )
+    }
+
+    func setSubscriptionManagementState(
+        _ state: ManagementState,
+        targets: [SubscriptionMutationTarget]
+    ) async throws {
+        guard let subscriptionStore else { throw AppServicesError.storeUnavailable }
+        try await subscriptionStore.setManagementState(state, for: targets)
+        notifySubscriptionDataChanged()
+    }
+
+    func confirmAutomaticRenewal(
+        _ request: SubscriptionRenewalRequest,
+        referenceDate: LocalDate = .today
+    ) async throws -> SubscriptionRenewalPreview {
+        guard let subscriptionStore else { throw AppServicesError.storeUnavailable }
+        let preview = try await subscriptionStore.confirmAutomaticRenewal(
+            request,
+            referenceDate: referenceDate
+        )
+        notifySubscriptionDataChanged()
+        return preview
+    }
+
+    func markAutomaticRenewalNotRenewed(
+        _ request: SubscriptionNonRenewalRequest,
+        referenceDate: LocalDate = .today
+    ) async throws {
+        guard let subscriptionStore else { throw AppServicesError.storeUnavailable }
+        try await subscriptionStore.markAutomaticRenewalNotRenewed(
+            request,
+            referenceDate: referenceDate
+        )
+        subscriptionNotifications.recordHandledPeriod(
+            subscriptionID: request.subscriptionID,
+            expiry: request.expectedExpiry
+        )
+        notifySubscriptionDataChanged()
     }
 
     func reconcileSubscriptionNotifications(
@@ -118,4 +211,67 @@ final class AppServices {
             referenceDate: referenceDate
         )
     }
+
+    func requestSubscriptionNotificationAuthorization(
+        referenceDate: LocalDate = .today
+    ) async throws {
+        await subscriptionNotifications.requestAuthorization()
+        try await reconcileSubscriptionNotifications(referenceDate: referenceDate)
+    }
+
+    func reconcileSubscriptionNotifications(referenceDate: LocalDate = .today) async throws {
+        guard let subscriptionStore else { throw AppServicesError.storeUnavailable }
+        let subscriptions = try await subscriptionStore.fetchAll()
+        await reconcileSubscriptionNotifications(
+            subscriptions: subscriptions,
+            referenceDate: referenceDate
+        )
+    }
+
+    static func defaultIconStorageRoot(
+        useMemoryStore: Bool,
+        temporaryDirectory: URL = FileManager.default.temporaryDirectory
+    ) -> URL? {
+        guard useMemoryStore else { return nil }
+        return temporaryDirectory
+            .appending(path: "Periodic", directoryHint: .isDirectory)
+            .appending(path: "InMemoryIconCache", directoryHint: .isDirectory)
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+    }
+
+    private var pendingIconCleanupReferences: Set<String> {
+        Set(defaults.stringArray(forKey: PreferenceKey.pendingIconCleanupReferences) ?? [])
+    }
+
+    private func storePendingIconCleanupReferences(_ references: Set<String>) {
+        if references.isEmpty {
+            defaults.removeObject(forKey: PreferenceKey.pendingIconCleanupReferences)
+        } else {
+            defaults.set(
+                references.sorted(),
+                forKey: PreferenceKey.pendingIconCleanupReferences
+            )
+        }
+    }
+
+    private func retryPendingIconCleanup() async {
+        let pendingReferences = pendingIconCleanupReferences
+        guard !pendingReferences.isEmpty, let dataExchange else { return }
+        do {
+            let referencedImages = try await dataExchange.referencedIconReferences()
+            let orphanedReferences = pendingReferences.subtracting(referencedImages)
+            let failures = await appleIconCache.removeStoredImages(
+                references: orphanedReferences
+            )
+            storePendingIconCleanupReferences(failures)
+        } catch {
+            AppLog.persistence.error("Failed to retry subscription icon cleanup")
+        }
+    }
+}
+
+private enum AppServicesError: LocalizedError {
+    case storeUnavailable
+
+    var errorDescription: String? { "订阅数据库尚未就绪。" }
 }

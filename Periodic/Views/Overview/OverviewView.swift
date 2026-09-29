@@ -2,11 +2,30 @@ import SwiftUI
 
 struct OverviewView: View {
     @Bindable var session: WindowSession
+    @Environment(AppServices.self) private var services
     @Environment(\.currencyDisplayStyle) private var currencyDisplayStyle
     @AppStorage(PreferenceKey.selectedCurrencies) private var selectedCurrenciesRaw = ""
+    @AppStorage(PreferenceKey.overviewVisibleColumns) private var visibleColumnsRaw = ""
+    @AppStorage(PreferenceKey.overviewSortOption) private var sortOption =
+        OverviewSortOption.remainingDaysDescending
     @State private var selection = Set<SubscriptionListItem.ID>()
+    @State private var deletionPreview: SubscriptionDeletionPreview?
+    @State private var isPreparingDeletion = false
+    @State private var isDeleting = false
+    @State private var error: PresentedError?
+    @State private var collapsedGroupIDs = Set<String>()
 
-    private var items: [SubscriptionListItem] { session.filteredItems }
+    private var items: [SubscriptionListItem] {
+        sortOption.sorted(session.filteredItems, referenceDate: session.referenceDate)
+    }
+    private var visibleItemIDs: Set<SubscriptionListItem.ID> { Set(items.map(\.id)) }
+    private var actionableSelection: Set<SubscriptionListItem.ID> {
+        OverviewSelection.visibleIDs(in: selection, items: items)
+    }
+    private var visibleColumns: [OverviewTextColumn] {
+        let selected = OverviewColumnPreferences.visibleColumns(from: visibleColumnsRaw)
+        return OverviewTextColumn.allCases.filter(selected.contains)
+    }
     private var analytics: SubscriptionAnalytics {
         SubscriptionAnalytics(items: items, referenceDate: session.referenceDate)
     }
@@ -20,6 +39,23 @@ struct OverviewView: View {
             footer
         }
         .toolbar { toolbarContent }
+        .errorAlert($error)
+        .confirmationDialog(
+            "永久删除所选订阅？",
+            isPresented: Binding(
+                get: { deletionPreview != nil },
+                set: { if !$0 { deletionPreview = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: deletionPreview
+        ) { preview in
+            Button("永久删除", role: .destructive) { delete(preview) }
+            Button("取消", role: .cancel) {}
+        } message: { preview in
+            Text(
+                "将删除 \(preview.subscriptionCount) 条订阅和 \(preview.periodCount) 条周期记录。此操作无法撤销。"
+            )
+        }
         .accessibilityIdentifier("overview-page")
     }
 
@@ -74,7 +110,7 @@ struct OverviewView: View {
                 }
                 .width(min: 140, ideal: 210, max: 210)
 
-                TableColumnForEach(OverviewTextColumn.allCases) { column in
+                TableColumnForEach(visibleColumns) { column in
                     TableColumn(column.title) { item in
                         column.content(
                             for: item,
@@ -100,9 +136,11 @@ struct OverviewView: View {
                     ForEach(ServiceCategory.allCases) { category in
                         let groupedItems = items.filter { $0.categoryValue == category }
                         if !groupedItems.isEmpty {
-                            Section("\(category.title)（\(groupedItems.count)）") {
-                                ForEach(groupedItems) { item in
-                                    TableRow(item)
+                            Section(groupTitle(category.title, items: groupedItems)) {
+                                if !collapsedGroupIDs.contains(categoryGroupID(category)) {
+                                    ForEach(groupedItems) { item in
+                                        TableRow(item)
+                                    }
                                 }
                             }
                         }
@@ -111,9 +149,11 @@ struct OverviewView: View {
                     ForEach(ManagementState.allCases) { state in
                         let groupedItems = items.filter { $0.managementState == state }
                         if !groupedItems.isEmpty {
-                            Section("\(state.title)（\(groupedItems.count)）") {
-                                ForEach(groupedItems) { item in
-                                    TableRow(item)
+                            Section(groupTitle(state.title, items: groupedItems)) {
+                                if !collapsedGroupIDs.contains(managementGroupID(state)) {
+                                    ForEach(groupedItems) { item in
+                                        TableRow(item)
+                                    }
                                 }
                             }
                         }
@@ -121,12 +161,30 @@ struct OverviewView: View {
                 }
             }
             .contextMenu(forSelectionType: SubscriptionListItem.ID.self) { selectedIDs in
-                if let id = selectedIDs.first {
+                if selectedIDs.count == 1, let id = selectedIDs.first {
                     Button("订阅详情") {
                         session.presentDetails(for: id)
                     }
                     Button("编辑订阅") {
                         session.presentEditor(for: id)
+                    }
+                    Button("复制订阅") {
+                        session.presentDuplicate(for: id)
+                    }
+                }
+                if !selectedIDs.isEmpty {
+                    Divider()
+                    Button("停用所选订阅") {
+                        updateManagementState(.inactive, ids: selectedIDs)
+                    }
+                    Button("恢复所选订阅") {
+                        updateManagementState(.active, ids: selectedIDs)
+                    }
+                    Button(
+                        selectedIDs.count == 1 ? "删除订阅…" : "删除 \(selectedIDs.count) 条订阅…",
+                        role: .destructive
+                    ) {
+                        prepareDeletion(selectedIDs)
                     }
                 }
             } primaryAction: { selectedIDs in
@@ -135,9 +193,12 @@ struct OverviewView: View {
                 }
             }
             .onKeyPress(.return) {
-                guard let id = selection.first else { return .ignored }
+                guard let id = actionableSelection.first else { return .ignored }
                 session.presentDetails(for: id)
                 return .handled
+            }
+            .onChange(of: visibleItemIDs) { _, ids in
+                selection.formIntersection(ids)
             }
 
             if items.isEmpty {
@@ -243,19 +304,79 @@ struct OverviewView: View {
                 )
             }
 
-            Picker("分组", selection: $session.grouping) {
-                ForEach(OverviewGrouping.allCases) { grouping in
-                    Text(grouping.title).tag(grouping)
+            Menu {
+                Picker("分组", selection: $session.grouping) {
+                    ForEach(OverviewGrouping.allCases) { grouping in
+                        Text(grouping.title).tag(grouping)
+                    }
+                }
+                if session.grouping != .none {
+                    Divider()
+                    Menu("折叠分组") {
+                        ForEach(visibleGroupOptions, id: \.id) { option in
+                            Toggle(
+                                option.title,
+                                isOn: collapsedGroupBinding(option.id)
+                            )
+                        }
+                        Divider()
+                        Button("展开全部") { collapsedGroupIDs.removeAll() }
+                    }
+                }
+            } label: {
+                Label(session.grouping.title, systemImage: "rectangle.3.group")
+            }
+
+            Menu {
+                ForEach(OverviewTextColumn.allCases) { column in
+                    Toggle(column.title, isOn: columnVisibilityBinding(column))
+                }
+                Divider()
+                Button("恢复默认列") {
+                    visibleColumnsRaw = ""
+                }
+            } label: {
+                Label("显示列", systemImage: "rectangle.split.3x1")
+            }
+
+            Picker("排序", selection: $sortOption) {
+                ForEach(OverviewSortOption.allCases) { option in
+                    Text(option.title).tag(option)
                 }
             }
             .pickerStyle(.menu)
 
             Menu {
-                Button("恢复默认列") {}
+                Button("选择全部结果") {
+                    selection = Set(items.map(\.id))
+                }
+                Button("选择已过期项目") {
+                    selection = Set(
+                        items
+                            .filter { analytics.status(of: $0) == .expired }
+                            .map(\.id)
+                    )
+                }
+                if actionableSelection.count == 1, let id = actionableSelection.first {
+                    Divider()
+                    Button("复制所选订阅") { session.presentDuplicate(for: id) }
+                }
+                if !actionableSelection.isEmpty {
+                    Divider()
+                    Button("停用所选订阅") {
+                        updateManagementState(.inactive, ids: actionableSelection)
+                    }
+                    Button("恢复所选订阅") {
+                        updateManagementState(.active, ids: actionableSelection)
+                    }
+                    Button("删除所选订阅…", role: .destructive) {
+                        prepareDeletion(actionableSelection)
+                    }
+                }
             } label: {
-                Label("显示列", systemImage: "rectangle.split.3x1")
+                Label("批量操作", systemImage: "checklist")
             }
-            .disabled(true)
+            .disabled(isPreparingDeletion || isDeleting || items.isEmpty)
 
             ToolbarSearchButton(
                 text: $session.searchText,
@@ -282,6 +403,160 @@ struct OverviewView: View {
         analytics.forecastItems.isEmpty
             ? "无参与预估的周期订阅"
             : "周期订阅预估 \(analytics.forecastItems.count) 项"
+    }
+
+    private func columnVisibilityBinding(_ column: OverviewTextColumn) -> Binding<Bool> {
+        Binding(
+            get: {
+                OverviewColumnPreferences.visibleColumns(from: visibleColumnsRaw).contains(column)
+            },
+            set: { isVisible in
+                var columns = OverviewColumnPreferences.visibleColumns(from: visibleColumnsRaw)
+                if isVisible {
+                    columns.insert(column)
+                } else {
+                    columns.remove(column)
+                }
+                visibleColumnsRaw = OverviewColumnPreferences.storedValue(for: columns)
+            }
+        )
+    }
+
+    private func prepareDeletion(_ ids: Set<UUID>) {
+        guard !ids.isEmpty else { return }
+        let targets = mutationTargets(for: ids)
+        guard targets.count == ids.count else {
+            error = PresentedError(
+                SubscriptionStore.StoreError.notFound,
+                title: "无法准备删除"
+            )
+            return
+        }
+        isPreparingDeletion = true
+        Task { @MainActor in
+            defer { isPreparingDeletion = false }
+            do {
+                deletionPreview = try await services.previewSubscriptionDeletion(
+                    targets: targets
+                )
+            } catch {
+                self.error = PresentedError(error, title: "无法准备删除")
+            }
+        }
+    }
+
+    private func delete(_ preview: SubscriptionDeletionPreview) {
+        isDeleting = true
+        Task { @MainActor in
+            defer { isDeleting = false }
+            do {
+                let outcome = try await services.deleteSubscriptions(preview)
+                selection.subtract(preview.targets.map(\.id))
+                deletionPreview = nil
+                await session.reload(using: services)
+                if outcome.pendingIconCleanupCount > 0 {
+                    self.error = PresentedError(
+                        SubscriptionDeletionNotice.iconCleanupPending,
+                        title: "订阅已删除"
+                    )
+                }
+            } catch {
+                self.error = PresentedError(error, title: "无法删除订阅")
+            }
+        }
+    }
+
+    private var visibleGroupOptions: [(id: String, title: String)] {
+        switch session.grouping {
+        case .none:
+            []
+        case .category:
+            ServiceCategory.allCases.compactMap { category in
+                guard items.contains(where: { $0.categoryValue == category }) else { return nil }
+                return (categoryGroupID(category), category.title)
+            }
+        case .managementState:
+            ManagementState.allCases.compactMap { state in
+                guard items.contains(where: { $0.managementState == state }) else { return nil }
+                return (managementGroupID(state), state.title)
+            }
+        }
+    }
+
+    private func categoryGroupID(_ category: ServiceCategory) -> String {
+        "category.\(category.rawValue)"
+    }
+
+    private func managementGroupID(_ state: ManagementState) -> String {
+        "management.\(state.rawValue)"
+    }
+
+    private func collapsedGroupBinding(_ id: String) -> Binding<Bool> {
+        Binding(
+            get: { collapsedGroupIDs.contains(id) },
+            set: { isCollapsed in
+                if isCollapsed {
+                    collapsedGroupIDs.insert(id)
+                } else {
+                    collapsedGroupIDs.remove(id)
+                }
+            }
+        )
+    }
+
+    private func groupTitle(_ title: String, items: [SubscriptionListItem]) -> String {
+        let totals = Dictionary(grouping: items, by: { $0.money.currency })
+            .map { currency, values in
+                let amount = values.reduce(Decimal.zero) { $0 + $1.money.decimalValue }
+                return Money.display(amount, currency: currency, style: currencyDisplayStyle)
+            }
+            .sorted()
+            .joined(separator: " · ")
+        let subtotal = totals.isEmpty ? "" : " · \(totals)"
+        return "\(title)（\(items.count)）\(subtotal)"
+    }
+
+    private func updateManagementState(_ state: ManagementState, ids: Set<UUID>) {
+        guard !ids.isEmpty else { return }
+        let targets = mutationTargets(for: ids)
+        guard targets.count == ids.count else {
+            error = PresentedError(
+                SubscriptionStore.StoreError.notFound,
+                title: "无法更新订阅状态"
+            )
+            return
+        }
+        Task { @MainActor in
+            do {
+                try await services.setSubscriptionManagementState(
+                    state,
+                    targets: targets
+                )
+                await session.reload(using: services)
+            } catch {
+                self.error = PresentedError(error, title: "无法更新订阅状态")
+            }
+        }
+    }
+
+    private func mutationTargets(
+        for ids: Set<UUID>
+    ) -> [SubscriptionMutationTarget] {
+        session.subscriptions.compactMap { subscription in
+            guard ids.contains(subscription.id) else { return nil }
+            return SubscriptionMutationTarget(
+                id: subscription.id,
+                expectedRevision: subscription.revision
+            )
+        }
+    }
+}
+
+private enum SubscriptionDeletionNotice: LocalizedError {
+    case iconCleanupPending
+
+    var errorDescription: String? {
+        "订阅数据已删除，但部分本地图标暂时无法清理；应用下次启动时会自动重试。"
     }
 }
 

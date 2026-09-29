@@ -231,7 +231,12 @@ struct DashboardView: View {
     }
 
     private var categoryCard: some View {
-        DashboardCard(title: "服务类型年化", symbol: "chart.bar.xaxis") {
+        DashboardCard(
+            title: "服务类型年化",
+            symbol: "chart.bar.xaxis",
+            titleAction: expandAllCategories,
+            titleActionHint: "展开所有服务类型明细"
+        ) {
             if categoryForecastGroups.isEmpty {
                 Text("暂无费用数据")
                     .foregroundStyle(.secondary)
@@ -299,6 +304,10 @@ struct DashboardView: View {
                 }
             }
         }
+    }
+
+    private func expandAllCategories() {
+        expandedCategories.formUnion(categoryForecastGroups.map(\.category))
     }
 
     private var currencyForecasts: [CurrencyForecast] {

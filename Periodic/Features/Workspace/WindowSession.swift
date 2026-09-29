@@ -25,6 +25,7 @@ final class WindowSession {
     private(set) var isPresentingReminderCenter = false
     private(set) var reminderCenterScope = SubscriptionReminderScope.all
     private(set) var editingSubscriptionID: UUID?
+    private(set) var duplicatingSubscriptionID: UUID?
     private(set) var subscriptionEditorPreset: SubscriptionTemplatePreset?
     private(set) var detailSubscriptionID: UUID?
     private(set) var subscriptions: [SubscriptionDTO] = []
@@ -116,6 +117,11 @@ final class WindowSession {
         return subscriptions.first { $0.id == editingSubscriptionID }
     }
 
+    var duplicatingSubscription: SubscriptionDTO? {
+        guard let duplicatingSubscriptionID else { return nil }
+        return subscriptions.first { $0.id == duplicatingSubscriptionID }
+    }
+
     var detailSubscription: SubscriptionDTO? {
         guard let detailSubscriptionID else { return nil }
         return subscriptions.first { $0.id == detailSubscriptionID }
@@ -123,7 +129,16 @@ final class WindowSession {
 
     func presentNewSubscription(preset: SubscriptionTemplatePreset? = nil) {
         editingSubscriptionID = nil
+        duplicatingSubscriptionID = nil
         subscriptionEditorPreset = preset
+        isPresentingSubscriptionEditor = true
+    }
+
+    func presentDuplicate(for id: UUID) {
+        guard subscriptions.contains(where: { $0.id == id }) else { return }
+        editingSubscriptionID = nil
+        duplicatingSubscriptionID = id
+        subscriptionEditorPreset = nil
         isPresentingSubscriptionEditor = true
     }
 
@@ -158,6 +173,7 @@ final class WindowSession {
     func presentEditor(for id: UUID) {
         guard subscriptions.contains(where: { $0.id == id }) else { return }
         subscriptionEditorPreset = nil
+        duplicatingSubscriptionID = nil
         editingSubscriptionID = id
         isPresentingSubscriptionEditor = true
     }
@@ -182,6 +198,7 @@ final class WindowSession {
     func dismissEditor() {
         isPresentingSubscriptionEditor = false
         editingSubscriptionID = nil
+        duplicatingSubscriptionID = nil
         subscriptionEditorPreset = nil
     }
 

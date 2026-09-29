@@ -5,7 +5,9 @@ struct SubscriptionEditorView: View {
     @AppStorage(PreferenceKey.selectedCurrencies) private var selectedCurrenciesRaw = ""
 
     let subscription: SubscriptionDTO?
+    let duplicate: SubscriptionDTO?
     let preset: SubscriptionTemplatePreset?
+    private let initialNotificationSchedule: SubscriptionNotificationSchedule
     let onSave: @MainActor (
         SubscriptionCreateInput,
         SubscriptionUpdateHistoryPolicy
@@ -25,6 +27,11 @@ struct SubscriptionEditorView: View {
     @State private var hasExpiryDate = false
     @State private var expiryDate = Date()
     @State private var reminderEnabled = true
+    @State private var reminderTiming = SubscriptionReminderTiming.oneDayBefore
+    @State private var customReminderDate = Date()
+    @State private var customReminderFollowsExpiry = true
+    @State private var reminderMinuteOfDay = SubscriptionNotificationSchedule.defaultMinuteOfDay
+    @State private var isReminderScheduleModified = false
     @State private var automaticallyRenews = false
     @State private var note = ""
     @State private var isSaving = false
@@ -35,6 +42,7 @@ struct SubscriptionEditorView: View {
 
     init(
         subscription: SubscriptionDTO? = nil,
+        duplicate: SubscriptionDTO? = nil,
         preset: SubscriptionTemplatePreset? = nil,
         onSave: @escaping @MainActor (
             SubscriptionCreateInput,
@@ -42,36 +50,64 @@ struct SubscriptionEditorView: View {
         ) async throws -> Void
     ) {
         self.subscription = subscription
+        self.duplicate = duplicate
         self.preset = preset
         self.onSave = onSave
-        _name = State(initialValue: subscription?.name ?? preset?.name ?? "")
-        _iconResourceName = State(initialValue: subscription?.iconResourceName ?? preset?.iconResourceName)
-        _iconURLString = State(initialValue: subscription?.iconURLString ?? preset?.iconURLString)
-        _category = State(initialValue: subscription?.category ?? preset?.category ?? .other)
-        _managementState = State(initialValue: subscription?.managementState ?? .active)
-        _billingKind = State(initialValue: subscription?.billingKind ?? preset?.billingKind ?? .recurring)
-        let cycleMonths = subscription?.cycleMonths ?? preset?.cycleMonths
+        let source = subscription ?? duplicate
+        _name = State(
+            initialValue: duplicate.map { $0.name + AppLocalization.string(" 副本") }
+                ?? subscription?.name
+                ?? preset?.name
+                ?? ""
+        )
+        _iconResourceName = State(initialValue: source?.iconResourceName ?? preset?.iconResourceName)
+        _iconURLString = State(initialValue: source?.iconURLString ?? preset?.iconURLString)
+        _category = State(initialValue: source?.category ?? preset?.category ?? .other)
+        _managementState = State(initialValue: source?.managementState ?? .active)
+        _billingKind = State(initialValue: source?.billingKind ?? preset?.billingKind ?? .recurring)
+        let cycleMonths = source?.cycleMonths ?? preset?.cycleMonths
         _billingCycle = State(initialValue: cycleMonths.flatMap(BillingCycle.init(rawValue:)) ?? .monthly)
-        _amountText = State(initialValue: subscription?.money.inputText ?? preset?.money?.inputText ?? "")
+        _amountText = State(initialValue: source?.money.inputText ?? preset?.money?.inputText ?? "")
         _currency = State(
-            initialValue: subscription?.money.currency
+            initialValue: source?.money.currency
                 ?? preset?.money?.currency
                 ?? preset?.currency
                 ?? AppPreferenceValues.defaultCurrency
         )
-        _hasStartDate = State(initialValue: subscription?.periodStart != nil)
-        _startDate = State(initialValue: subscription?.periodStart?.date() ?? Date())
-        _hasExpiryDate = State(initialValue: subscription?.expiry != nil)
-        _expiryDate = State(initialValue: subscription?.expiry?.date() ?? Date())
-        _reminderEnabled = State(initialValue: subscription?.reminderEnabled ?? true)
-        _automaticallyRenews = State(initialValue: subscription?.automaticallyRenews ?? false)
-        _note = State(initialValue: subscription?.note ?? "")
+        _hasStartDate = State(initialValue: source?.periodStart != nil)
+        _startDate = State(initialValue: source?.periodStart?.date() ?? Date())
+        let initialExpiryDate = source?.expiry?.date() ?? Date()
+        _hasExpiryDate = State(initialValue: source?.expiry != nil)
+        _expiryDate = State(initialValue: initialExpiryDate)
+        _reminderEnabled = State(initialValue: source?.reminderEnabled ?? true)
+        let initialAdvanceDays = source?.reminderAdvanceDays
+            ?? SubscriptionNotificationSchedule.defaultAdvanceDays
+        let initialMinuteOfDay = source?.reminderMinuteOfDay
+            ?? SubscriptionNotificationSchedule.defaultMinuteOfDay
+        let initialSchedule = SubscriptionNotificationSchedule(
+            advanceDays: initialAdvanceDays,
+            minuteOfDay: initialMinuteOfDay
+        )
+        initialNotificationSchedule = initialSchedule
+        _reminderTiming = State(
+            initialValue: SubscriptionReminderTiming(
+                advanceDays: initialAdvanceDays,
+                minuteOfDay: initialMinuteOfDay
+            )
+        )
+        _customReminderDate = State(
+            initialValue: initialSchedule.reminderDate(relativeTo: initialExpiryDate)
+        )
+        _customReminderFollowsExpiry = State(initialValue: true)
+        _reminderMinuteOfDay = State(initialValue: initialMinuteOfDay)
+        _automaticallyRenews = State(initialValue: source?.automaticallyRenews ?? false)
+        _note = State(initialValue: source?.note ?? "")
     }
 
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text(subscription == nil ? "新建订阅" : "编辑订阅")
+                Text(editorTitle)
                     .font(.title2.weight(.semibold))
                 Spacer()
             }
@@ -187,7 +223,42 @@ struct SubscriptionEditorView: View {
                         Toggle("服务商自动续费", isOn: $automaticallyRenews)
                             .disabled(managementState != .active)
                             .accessibilityHint("到期日提醒确认，Periodic 不会自动扣款或延长周期")
-                        Text("到期提醒会进入全部提醒和今日到期；服务商自动续费到期后还会进入待续费。")
+
+                        if reminderEnabled && !automaticallyRenews {
+                            Picker("提醒时间", selection: reminderTimingBinding) {
+                                ForEach(SubscriptionReminderTiming.allCases) { timing in
+                                    Text(timing.title).tag(timing)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .accessibilityIdentifier("subscription-reminder-timing")
+
+                            if reminderTiming == .custom {
+                                DatePicker(
+                                    "自定义提醒时间",
+                                    selection: customReminderDateBinding,
+                                    in: ...customReminderLatestDate,
+                                    displayedComponents: [.date, .hourAndMinute]
+                                )
+                                .disabled(!hasExpiryDate)
+
+                                if !hasExpiryDate {
+                                    Text("请先设置到期日期，再选择自定义提醒时间。")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+
+                        if automaticallyRenews {
+                            DatePicker(
+                                "提醒时间",
+                                selection: reminderTimeBinding,
+                                displayedComponents: .hourAndMinute
+                            )
+                        }
+
+                        Text(reminderExplanation)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -198,6 +269,15 @@ struct SubscriptionEditorView: View {
             }
             .formStyle(.grouped)
             .scrollContentBackground(.hidden)
+            .onChange(of: expiryDate) { previousExpiryDate, expiryDate in
+                customReminderDate = SubscriptionNotificationSchedule
+                    .adjustedCustomReminderDate(
+                        current: customReminderDate,
+                        previousExpiryDate: previousExpiryDate,
+                        expiryDate: expiryDate,
+                        followsExpiry: customReminderFollowsExpiry
+                    )
+            }
 
             Divider()
 
@@ -279,6 +359,65 @@ struct SubscriptionEditorView: View {
         return "未设置品牌图标，当前使用占位图标"
     }
 
+    private var editorTitle: String {
+        if subscription != nil { return AppLocalization.string("编辑订阅") }
+        if duplicate != nil { return AppLocalization.string("复制订阅") }
+        return AppLocalization.string("新建订阅")
+    }
+
+    private var reminderExplanation: String {
+        if automaticallyRenews {
+            return AppLocalization.string(
+                "服务商自动续费只在到期日提醒一次，避免与普通到期提醒重复。"
+            )
+        }
+        return AppLocalization.string(
+            "预设提醒会在本地时间 09:00 发送；自定义可选择具体日期和时间。"
+        )
+    }
+
+    private var reminderTimeBinding: Binding<Date> {
+        Binding(
+            get: {
+                Calendar.current.date(
+                    byAdding: .minute,
+                    value: reminderMinuteOfDay,
+                    to: Calendar.current.startOfDay(for: Date())
+                ) ?? Date()
+            },
+            set: { date in
+                let components = Calendar.current.dateComponents([.hour, .minute], from: date)
+                let minuteOfDay = (components.hour ?? 9) * 60 + (components.minute ?? 0)
+                guard reminderMinuteOfDay != minuteOfDay else { return }
+                reminderMinuteOfDay = minuteOfDay
+                isReminderScheduleModified = true
+            }
+        )
+    }
+
+    private var reminderTimingBinding: Binding<SubscriptionReminderTiming> {
+        Binding(
+            get: { reminderTiming },
+            set: { timing in
+                guard reminderTiming != timing else { return }
+                reminderTiming = timing
+                isReminderScheduleModified = true
+            }
+        )
+    }
+
+    private var customReminderDateBinding: Binding<Date> {
+        Binding(
+            get: { customReminderDate },
+            set: { date in
+                guard customReminderDate != date else { return }
+                customReminderDate = date
+                customReminderFollowsExpiry = false
+                isReminderScheduleModified = true
+            }
+        )
+    }
+
     private func save() {
         do {
             let input = try validatedInput()
@@ -347,6 +486,9 @@ struct SubscriptionEditorView: View {
         if let start, let expiry, start > expiry {
             throw EditorValidationError.invalidDateRange
         }
+        let notificationSchedule = billingKind == .recurring
+            ? try notificationSchedule(expiry: expiry)
+            : .default
 
         return SubscriptionCreateInput(
             id: subscription?.id ?? UUID(),
@@ -363,10 +505,58 @@ struct SubscriptionEditorView: View {
             money: money,
             note: note,
             reminderEnabled: billingKind == .recurring && reminderEnabled,
+            reminderAdvanceDays: notificationSchedule.advanceDays,
+            reminderMinuteOfDay: notificationSchedule.minuteOfDay,
             automaticallyRenews: billingKind == .recurring
                 && managementState == .active
                 && hasExpiryDate
                 && automaticallyRenews
+        )
+    }
+
+    private var customReminderLatestDate: Date {
+        Calendar.current.date(
+            bySettingHour: 23,
+            minute: 59,
+            second: 59,
+            of: expiryDate
+        ) ?? expiryDate
+    }
+
+    private func notificationSchedule(
+        expiry: LocalDate?
+    ) throws -> SubscriptionNotificationSchedule {
+        if automaticallyRenews {
+            return SubscriptionNotificationSchedule(
+                advanceDays: [0],
+                minuteOfDay: reminderMinuteOfDay
+            )
+        }
+        guard reminderEnabled, isReminderScheduleModified else {
+            return initialNotificationSchedule
+        }
+        let editedSchedule: SubscriptionNotificationSchedule
+        if let advanceDays = reminderTiming.advanceDays {
+            editedSchedule = SubscriptionNotificationSchedule(
+                advanceDays: [advanceDays],
+                minuteOfDay: SubscriptionNotificationSchedule.defaultMinuteOfDay
+            )
+        } else {
+            guard let expiry else {
+                throw EditorValidationError.customReminderRequiresExpiry
+            }
+            guard let schedule = SubscriptionNotificationSchedule(
+                reminderDate: customReminderDate,
+                expiry: expiry
+            ) else {
+                throw EditorValidationError.customReminderAfterExpiry
+            }
+            editedSchedule = schedule
+        }
+        return SubscriptionNotificationSchedule.resolvingEditorSchedule(
+            initial: initialNotificationSchedule,
+            edited: editedSchedule,
+            isModified: isReminderScheduleModified
         )
     }
 }
@@ -374,11 +564,56 @@ struct SubscriptionEditorView: View {
 private enum EditorValidationError: LocalizedError {
     case emptyName
     case invalidDateRange
+    case customReminderRequiresExpiry
+    case customReminderAfterExpiry
 
     var errorDescription: String? {
         switch self {
         case .emptyName: "请输入订阅名称。"
         case .invalidDateRange: "到期日期不能早于开始日期。"
+        case .customReminderRequiresExpiry: "请先设置到期日期，再选择自定义提醒时间。"
+        case .customReminderAfterExpiry: "自定义提醒时间不能晚于到期日期。"
+        }
+    }
+}
+
+private enum SubscriptionReminderTiming: String, CaseIterable, Identifiable {
+    case oneDayBefore
+    case threeDaysBefore
+    case sevenDaysBefore
+    case custom
+
+    var id: Self { self }
+
+    init(advanceDays: [Int], minuteOfDay: Int) {
+        guard advanceDays.count == 1,
+              minuteOfDay == SubscriptionNotificationSchedule.defaultMinuteOfDay else {
+            self = .custom
+            return
+        }
+        self = switch advanceDays[0] {
+        case 1: .oneDayBefore
+        case 3: .threeDaysBefore
+        case 7: .sevenDaysBefore
+        default: .custom
+        }
+    }
+
+    var advanceDays: Int? {
+        switch self {
+        case .oneDayBefore: 1
+        case .threeDaysBefore: 3
+        case .sevenDaysBefore: 7
+        case .custom: nil
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .oneDayBefore: AppLocalization.string("提前 1 天")
+        case .threeDaysBefore: AppLocalization.string("提前 3 天")
+        case .sevenDaysBefore: AppLocalization.string("提前 7 天")
+        case .custom: AppLocalization.string("自定义时间")
         }
     }
 }

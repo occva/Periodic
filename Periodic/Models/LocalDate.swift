@@ -22,6 +22,18 @@ struct LocalDate: Hashable, Comparable, Codable, Sendable {
 
     static var today: LocalDate { LocalDate(Date()) }
 
+    init?(year: Int, month: Int, day: Int) {
+        guard let date = Self.utcGregorian.date(
+            from: DateComponents(year: year, month: month, day: day)
+        ) else { return nil }
+        self.init(date, calendar: Self.utcGregorian)
+        guard self.year == year,
+              self.dateComponents.month == month,
+              self.dateComponents.day == day else {
+            return nil
+        }
+    }
+
     static func < (lhs: LocalDate, rhs: LocalDate) -> Bool {
         lhs.dayNumber < rhs.dayNumber
     }
@@ -30,6 +42,8 @@ struct LocalDate: Hashable, Comparable, Codable, Sendable {
         let components = dateComponents
         return String(format: "%04d/%02d/%02d", components.year ?? 0, components.month ?? 0, components.day ?? 0)
     }
+
+    var year: Int { dateComponents.year ?? 1970 }
 
     var iso8601Text: String {
         let components = dateComponents

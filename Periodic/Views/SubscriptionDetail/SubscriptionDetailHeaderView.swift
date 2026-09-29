@@ -33,7 +33,7 @@ struct SubscriptionDetailHeaderView: View {
             }
             Spacer()
             renewalActions
-            Button("编辑订阅", systemImage: "pencil", action: onEditSubscription)
+            Button("编辑订阅", action: onEditSubscription)
                 .buttonStyle(.glass)
         }
         .padding(20)
@@ -43,20 +43,16 @@ struct SubscriptionDetailHeaderView: View {
     private var renewalActions: some View {
         if subscription.automaticallyRenews {
             if canConfirmRenewal {
-                Button("未续费", systemImage: "xmark", action: onMarkNotRenewed)
+                Button("未续费", action: onMarkNotRenewed)
                     .disabled(isConfirmingRenewal)
                     .buttonStyle(.glass)
 
-                Button(
-                    "已续费",
-                    systemImage: "arrow.trianglehead.2.clockwise.rotate.90",
-                    action: onConfirmRenewal
-                )
+                Button("已续费", action: onConfirmRenewal)
                 .disabled(isConfirmingRenewal)
                 .buttonStyle(.glassProminent)
                 .accessibilityHint("更新当前周期并添加一条续费周期记录")
             } else {
-                Label("服务商自动续费", systemImage: "arrow.trianglehead.2.clockwise.rotate.90")
+                Text("服务商自动续费")
                     .foregroundStyle(.secondary)
             }
         }

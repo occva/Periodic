@@ -13,12 +13,12 @@
 | TIME-05～07 | 1 月 / 3 月 / 1 年 / 5 年、宽度适配、纵向滚动、定位 | TimelineViewport、TimelineLayout | 完整范围适配窗口，切换不丢失中心日期 |
 | TIME-08～09 | 无日期列表、详情、编辑、续费 | 同一筛选快照；复用 Tab1 服务 | 未知日期不伪造位置，修改后自动刷新 |
 | TIME-10～13 | 前后平移、近 15 天卡片、终生独立列表 | dueHorizonDays、TimelineSnapshot | 临期不受轴上年份限制，终生不算未知 |
-| DETAIL-01～08、PERIOD-01～07 | 从事件进入共享详情、当年历史、手动周期 | SubscriptionService.detail + PeriodService | 和列表同一详情；主轴不展开历史付款/周期 |
+| DETAIL-01～05、PERIOD-01～06 | 从事件进入共享详情、全量历史、手动周期 | SubscriptionService.detail + PeriodService | 和列表同一详情；主轴不展开历史付款/周期 |
 | NAV-05、RULE-01～04 | 共享筛选、自然日状态 | WindowSession.filter、Clock、DateRules | 与表格一致，跨日自动更新 |
-| NOTIFY-01～06 | 全局授权、到期本地提醒、核对和点击路由 | app_settings + subscriptions；NotificationService | 系统授权下处理未来提醒，异常可见可重试 |
+| NOTIFY-01～06 | 系统授权、单条到期本地提醒、核对和点击路由 | subscriptions；NotificationService | 系统授权下处理未来提醒，异常可见可重试 |
 | UI-01～04、QA-01～04 | 原生布局、可访问性、滚动性能 | TimelineStore、LazyVStack、语义化控件 | 1,000 条订阅可用，不依赖网络 |
 
-时间轴只展示每条周期订阅当前保存的到期事件；终生通过独立列表查看，不制造时间轴事件。不展开历史付款、不预测未来续费、不提供拖拽改期，也不写入系统日历。所有记录修改和模板新建调用 Tab1 共享服务。提醒设置仍在独立 Settings 窗口。
+时间轴只展示每条周期订阅当前保存的到期事件；终生通过独立列表查看，不制造时间轴事件。不展开历史付款、不预测未来续费、不提供拖拽改期，也不写入系统日历。所有记录修改和模板新建调用 Tab1 共享服务。单条提醒计划在订阅编辑器配置，Settings 只管理系统权限和调度状态。
 
 ## 2. 功能与页面流程
 
@@ -59,19 +59,19 @@
 | 点击今天 | 将今天日序号定位到中央，保留当前缩放 |
 | 前一/后一范围 | 中心按当前缩放平移 ±1/3/12/60 公历月，月末钳制并保留小数日偏移；边界禁用 |
 | 点击左/右范围提示 | 把该条目的到期日定位到中央，保留其行及纵向位置 |
-| 点击日期点或标签 | 打开共享详情，历史默认当年，可手动维护周期和付款、编辑当前资料及续费 |
+| 点击日期点或标签 | 打开共享详情并全量展示历史，可手动维护周期和付款、编辑当前资料及续费 |
 | 键盘激活事件 | 与点击一致；方向提示有日期和方向的可访问说明 |
 | 系统减少动态效果 | 定位直接更新或缩短动画，不用大幅缩放动画 |
 
 默认不允许拖拽事件。日期位置本身是事实的映射，修改日期必须经过共享表单的校验和保存。
 
-### 2.3.1 详情与年份的作用范围
+### 2.3.1 详情与时间轴的作用范围
 
-事件、无日期列表、终生列表及临期卡片使用同一个 detail(subscriptionID, history=currentYear) 路由。详情结构和接口以 Tab1 第 2.3.1～2.3.3、6.6 节为准；真正的服务请求类型为 SubscriptionDetailQuery，不另建日历专用详情。
+事件、无日期列表、终生列表及临期卡片使用同一个 detail(subscriptionID) 路由。详情结构和接口以 Tab1 第 2.3.1～2.3.3、6.6 节为准；真正的服务请求类型为 SubscriptionDetailQuery，不另建日历专用详情。
 
-详情历史表上方的年份栏默认当前公历年，不使用主轴 centerDay 的年份。即使用户正在主轴浏览 2024 年到期的记录，打开详情也先显示当年历史及“查看全部”入口；顶部当前日期仍展示真实记录，不能被选年隐藏。主轴默认五年、缩放和今天定位保持原设计。
+详情历史始终全量展示，不接收主轴 centerDay 的年份。主轴默认五年、缩放和今天定位保持原设计。
 
-返回详情时保持主轴中心、缩放、纵向位置、筛选及焦点。详情仅新增/纠正旧周期不会把主轴移到该历史结束日，也不会重排提醒；“应用到当前设置”、设置当前周期或续费提交后才刷新主轴当前到期锚点与通知。自动刷新保留 viewport，提供“定位新到期日”操作。
+返回详情时保持主轴中心、缩放、纵向位置、筛选及焦点。详情仅新增/纠正旧周期不会把主轴移到该历史结束日，也不会重排提醒；编辑当前订阅或续费提交后才刷新主轴当前到期锚点与通知。自动刷新保留 viewport，提供“定位新到期日”操作。
 
 ### 2.4 空态与错误
 
@@ -87,7 +87,7 @@
 
 ### 2.5 临期卡片及截图核对
 
-截图中的“近 15 天即将到期”独立模块在本页保留，默认 N=15，可切 7/15/30。范围值放 WindowSession.dueHorizonDays，Tab3 共用范围值，但 Tab2 卡片取当前筛选结果、Tab3 取全库，分别标注“当前筛选”/“全库”。通知提前天数仍为设置中的 7/3/1/0，不能因切卡片范围而改通知计划。
+截图中的“近 15 天即将到期”独立模块在本页保留，默认 N=15，可切 7/15/30。范围值放 WindowSession.dueHorizonDays，Tab3 共用范围值，但 Tab2 卡片取当前筛选结果、Tab3 取全库，分别标注“当前筛选”/“全库”。每条订阅的提醒计划独立保存，不能因切卡片范围而改变。
 
 卡片集合 = 已筛选 recurring + active + `0 ≤ D ≤ N`，按 expiry/name/UUID 稳定排序。它独立于时间轴 viewport：即使正在浏览 2020 年，未来 15 天卡片仍按今天计算。零条明确显示当前条件下无临期，不伪造内容；有多条使用横向滚动卡片或按窗口换行，并始终显示总数。
 
@@ -105,7 +105,7 @@
 | --- | --- | --- |
 | subscriptions | id、name、symbolName、iconAsset、billingKindRaw、managementStateRaw、categoryRaw、periodStartDay、expiryDay、currencyCode、reminderEnabled、revision | 详情编辑/周期续费委托 Tab1；本页不直接写模型 |
 | icon_assets | id、relativePath、sha256、尺寸 | 只读缩略图；维护由 IconService 完成 |
-| app_settings | notificationsEnabled、reminderOffsetsData、reminderMinuteOfDay、viewPreferencesData、revision | SettingsService 提交后触发调度 |
+| app_settings | viewPreferencesData、revision | 只保存视图等应用偏好，不保存通知权限或单条提醒计划 |
 | store_metadata | datasetID、storeRevision | 验证快照、通知任务是否过期 |
 | mutation_receipts | 本页无需直接读取 | 共享编辑和设置写服务使用 |
 
@@ -139,12 +139,10 @@ Double 只用于屏幕坐标，数据库和日期业务仍使用整数自然日�
 | 表字段 | 类型 / 默认 | 校验及语义 |
 | --- | --- | --- |
 | subscriptions.reminderEnabled | Bool / 周期 true、终生 false | 单条提醒意图；终生固定 false |
-| app_settings.notificationsEnabled | Bool / false | 全局用户意图，不代表已获系统许可 |
-| app_settings.reminderOffsetsData | Data / JSON `[0,1,3,7]` | 整数自然日，非负、去重、升序；可空表示不安排任何时间点 |
-| app_settings.reminderMinuteOfDay | Int / 540 | 0…1439，540 即本地 09:00 |
-| app_settings.revision | Int64 / 1 | 设置修改并发校验 |
+| subscriptions.reminderAdvanceDaysRaw | String / `"1"` | 每条订阅独立配置；当前界面只保存一个非负自然日偏移，读取时兼容旧的逗号列表 |
+| subscriptions.reminderMinuteOfDay | Int / 540 | 每条订阅独立配置；0…1439，540 即本地 09:00 |
 
-日期减去提前天数若越界，设置提交或调度结果需给出具体错误，不 wrap 为另一日期。不把系统授权、pending 请求列表、已投递状态存进可备份设置；每次从系统获取当前状态。
+日期减去提前天数若越界，订阅提交或调度结果需给出具体错误，不 wrap 为另一日期。不把系统授权、pending 请求列表、已投递状态存进备份；每次从系统获取当前状态。
 
 ## 4. 日期坐标与布局算法
 
@@ -238,17 +236,17 @@ TimelineStore 在 MainActor 持有 snapshot、viewport、loadState、requestGene
 
 ### 6.1 开关与授权流程
 
-1. 默认全局关闭，不在启动时弹通知授权。
-2. 用户主动开启时，先检查系统授权；notDetermined 才请求 alert/sound 授权，保存用户开启意图。
-3. 拒绝后设置显示“系统通知未允许”和打开系统设置指引，其他业务照常；保留开启意图便于用户授权后在前台核对时恢复调度。
-4. 修改提前天数或时间先校验再一次保存，成功后核对请求。全局关闭时移除本应用的待发送提醒，不修改单条开关。
-5. 从数据包导入的开启状态不能触发未经用户操作的授权弹窗；若系统尚未授权，显示需用户主动授权的状态。
+1. 提醒开关、下拉选择和自定义时间属于每条订阅；设置页不提供全局业务开关。
+2. 普通启动、回前台和订阅保存只核对系统授权，不能间接弹出权限请求。
+3. 用户在设置页明确点击“允许通知”时，notDetermined 才请求 alert/sound 授权。
+4. 拒绝后设置显示“系统通知未允许”和打开系统设置指引，其他业务照常；授权恢复后前台核对重新安排。
+5. 修改单条订阅的提醒选项或自定义时间随订阅一次保存，成功后核对请求；导入数据不能触发未经用户操作的授权弹窗。
 
 ### 6.2 计划生成
 
-读取同一快照中的 settings 和 subscriptions，并捕获一次 now / timeZone。候选记录须满足 recurring、active、expiry 非空、reminderEnabled=true，全局也开启且系统允许通知。即使损坏/旧输入让终生记录带上日期，计划层仍拒绝调度并报告完整性错误。
+读取同一订阅快照并捕获一次 now / timeZone。候选记录须满足 recurring、active、expiry 非空、reminderEnabled=true 且系统允许通知。即使损坏/旧输入让终生记录带上日期，计划层仍拒绝调度并报告完整性错误。
 
-对每个 offset，目标自然日 = expiry - offset，目标时间为该日本地 reminderMinuteOfDay。构造公历日期组件的 `UNCalendarNotificationTrigger(repeats:false)`，时区为本次系统时区。若时刻 ≤ now 则跳过，不补发。夏令时不存在的本地时刻采用 Calendar 的下一有效时刻，重复时刻取第一次；必须仍属目标自然日，否则跳过并在诊断中说明。
+订阅在下拉菜单中选择提前 1 天、3 天、7 天或自定义时间。预设选项使用本地 09:00；自定义时间换算为相对到期日的自然日偏移和当天分钟数，以便订阅改期后仍保持相同提醒习惯。目标自然日 = expiry - offset。未到时间构造公历日期组件的 `UNCalendarNotificationTrigger(repeats:false)`，时区为本次系统时区。若时刻 ≤ now 且本期到期日不早于今天，应立即补发一次；兼容数据中同一订阅有多个已错过时刻时，只补最近的一个。夏令时不存在的本地时刻采用 Calendar 的下一有效时刻，重复时刻取第一次；必须仍属目标自然日，否则跳过并在诊断中说明。
 
 请求 ID：`subscription.<datasetID>.<subscriptionID>.<offsetDays>`。ID 不随名称/日期修改，修改后更新相同 ID 的内容和触发时间；新数据集使用新前缀，恢复后旧前缀全部移除。userInfo 仅包含 schemaVersion、datasetID、subscriptionID，不能依赖备份带回旧通知 ID。
 
@@ -256,15 +254,15 @@ TimelineStore 在 MainActor 持有 snapshot、viewport、loadState、requestGene
 
 ### 6.3 核对、容量与竞态
 
-`NotificationCoordinator` 为 App 级单实例，合并短时间多个变更，串行执行核对。触发原因：启动、回前台、时区/日期变化、订阅保存/改期/续费/停用/删除、单条或全局提醒修改、恢复/清空以及用户点击重试。
+`NotificationCoordinator` 为 App 级单实例，合并短时间多个变更，串行执行核对。触发原因：启动、回前台、时区/日期变化、订阅保存/改期/续费/停用/删除、单条提醒修改、恢复/清空以及用户点击重试。
 
-核对流程：读取最新期望计划 → 查询本应用系统 pending → 删除已无资格、旧数据集或不再存在的请求 → 对比并新增/替换有变化的请求 → 再读 pending 确认实际结果 → 发布状态。变更若在调度期间发生，递增 generation，中途检查并停止旧计划，最后再以最新版本核对一次，避免旧请求覆盖新日期。
+核对流程：读取最新期望计划 → 查询本应用系统 pending/delivered → 删除已无资格、旧数据集或不再存在的请求 → 根据本机提交记录选出未提交的补发计划 → 新增/替换未来请求并立即提交补发请求 → 再读系统状态确认结果 → 发布状态。提交指纹包含请求 ID 和目标时刻，仅在本机保存，同一计划不因重启或用户清理通知中心而重复补发。变更若在调度期间发生，递增 generation，中途检查并停止旧计划，最后再以最新版本核对一次，避免旧请求覆盖新日期。
 
 系统待发送容量不作为无限资源。实现一个可注入 capacityBudget，初始工程预算设为 64，用目标 macOS 环境验证；这不是操作系统保证，API 也不提供统一的最大值查询。按目标时刻、订阅 ID、offset 稳定排序，优先最近请求；实际添加错误与 pending 核对可能进一步降低可用数量。无法安排的候选数显示为 deferredCount 或 failedCount，启动/回前台后补齐。
 
 数量定义：candidateCount 为资格及未来时刻过滤后的候选；scheduledCount 为已核对正确存在的候选；deferredCount 为因预算未尝试的候选；failedCount 为尝试后仍未正确登记的候选。满足 `candidateCount = scheduledCount + deferredCount + failedCount`；清理旧请求失败另计 stalePendingCount。应用退出后系统可处理已提交的请求，不承诺后台自动扩充队列。
 
-已到触发时刻的请求在核对时不属于未来候选，不能将正常消失误报为失败；系统状态快照与 now 需要一起更新。数据库提交成功后调度失败，不回滚订阅或付款，展示重试入口。
+已到触发时刻的请求不再作为未来 pending 候选，而是在本期尚未到期时进入去重后的补发候选；系统状态快照与 now 需要一起更新。数据库提交成功后调度失败，不回滚订阅或付款，展示重试入口。
 
 ### 6.4 调度接口和输出字段
 
@@ -284,16 +282,15 @@ protocol NotificationPlanBuilder: Sendable {
 | --- | --- |
 | NotificationAuthorization | notDetermined / denied / authorized / limited；保留平台原始状态用于适配 |
 | ReconcileReason | launch / foreground / dayChanged / timeZoneChanged / dataChanged / settingsChanged / datasetChanged / retry |
-| NotificationPlanInput | version、订阅 DTO 列表、ReminderPreferences、now、timeZoneIdentifier、authorization |
-| ReminderPreferences | enabled、offsetDays:[Int]、minuteOfDay:Int；数据库映射见 3.3 |
+| NotificationPlanInput | version、包含各自提醒计划的订阅 DTO 列表、now、timeZoneIdentifier、authorization |
 | NotificationPlan | version、generation、computedAt、timeZoneIdentifier、按时刻排序的 candidates |
 | NotificationCandidate | requestID、subscriptionID、offsetDays、fireDate:Date、dateComponents、title、body、userInfo |
-| NotificationReport | version、checkedAt、authorization、globalEnabled、candidateCount、scheduledCount、deferredCount、failedCount、stalePendingCount、lastError? |
+| NotificationReport | version、checkedAt、authorization、candidateCount、scheduledCount、deferredCount、failedCount、stalePendingCount、lastError? |
 | NotificationRoutingPayload | schemaVersion:Int=1、datasetID:UUID、subscriptionID:UUID |
 
 系统适配器封装 `UNUserNotificationCenter` 的权限、getPending、add、remove 调用，便于用 fake 验证拒绝授权、容量限制和添加失败。NotificationReport 为内存状态，不进入备份；启动后允许显示“正在核对”。
 
-设置写接口复用 Tab3 `SettingsService.update`，禁止通知服务直接改数据库设置。UI 仅在用户明确开关动作上调用授权方法，不能由普通 reconcile 间接触发系统权限弹窗。
+订阅提醒字段通过订阅写服务提交，通知服务不直接改数据库。UI 仅在用户明确点击授权动作时调用授权方法，不能由普通 reconcile 间接触发系统权限弹窗。
 
 ### 6.5 点击通知
 
@@ -313,7 +310,7 @@ protocol NotificationPlanBuilder: Sendable {
 | Services/Notifications/NotificationCoordinator、NotificationPlanBuilder | 串行核对与纯计划生成 |
 | Services/Notifications/SystemNotificationClient、NotificationRouter | 系统 API 和点击转场 |
 | Services/ClockCoordinator | 共享今天与日期变化事件 |
-| Views/Settings/ReminderSettingsView | 独立设置窗口内的授权/提醒/状态视图 |
+| Views/Settings/ReminderSettingsView | 独立设置窗口内的系统授权、调度状态与重试视图 |
 
 实施顺序：
 
@@ -337,17 +334,17 @@ protocol NotificationPlanBuilder: Sendable {
 | 共享筛选 | Tab1 与 Tab2 匹配 ID 集合一致；表格金额排序不改变日历日期排序 | AC-12 |
 | 跨日与时区 | today 和标签更新、原年月日不变、正在浏览的历史中心不被强拉回今天 | AC-02～03 |
 | 默认与拒绝授权 | 首次不弹窗；主动开启才请求；拒绝不影响保存和续费 | AC-15 |
-| 计划内容 | 默认 7/3/1/0 日 09:00；过去时刻跳过；目标日文案正确；重复 offset 无重复请求 | NOTIFY-02～03 |
+| 计划内容 | 默认提前 1 日 09:00；3 日、7 日及自定义日期时间换算正确；错过时刻且本期未到期时只补发一次；补发使用实际剩余天数 | NOTIFY-02～03 |
 | 修改与竞争 | 改期、续费、停用、删除移除旧请求；快速连续修改最终只保留最新计划 | AC-15 |
 | 通知容量/失败 | 最近优先、四项候选计数守恒、待补数和失败数可见，重试不重复付款 | NOTIFY-05～06 |
 | 数据集恢复 | 旧数据集请求移除；新权限取本机状态；旧通知点击回总览 | BACKUP-05 |
 | 可访问性 | 红线有文字、方向按钮可键盘激活、事件 VoiceOver 信息完整、减少动态效果生效 | AC-21 |
 | 规模 | 1,000 行只渲染可见/预取内容；像素滚动不触发 DB 读取，无持续主线程卡顿 | AC-22 |
-| 15 天临期 | 0/15 日包含、16 日排除；切 7/30 边界准确；浏览历史年份不影响卡片；筛选仍生效 | AC-25 |
+| 15 天临期 | 0/15 日包含、16 日排除；切 7/30 边界准确；浏览时间轴年份不影响卡片；筛选仍生效 | AC-25 |
 | 终生集合 | 不入 dated/undated/临期/通知，单独 lifetime 计数，三集合之和等于结果数 | AC-26 |
 | 类型切换 | 周期改终生后移除旧通知及日期行；改回周期无日期后进入 undated，不造提醒 | DATA-06、AC-26 |
 | 共享详情 | 任一事件/列表/卡片可进入，布局与 Tab1 一致；关闭回原中心、行与筛选 | AC-30 |
-| 历史年份 | 主轴浏览旧年仍默认当年历史；详情切年不移动主轴、不改默认五年范围 | AC-32～33 |
-| 历史和当前 | 补录旧周期不生成额外事件/提醒；应用到当前/续费才刷新当前锚点和提醒 | AC-34～35 |
+| 全量历史 | 主轴浏览旧年时详情仍展示全部历史，不移动主轴、不改默认五年范围 | AC-32～33 |
+| 历史和当前 | 补录旧周期不生成额外事件/提醒；编辑当前订阅或续费才刷新当前锚点和提醒 | AC-34 |
 
 坐标和提醒计划使用固定 Clock 的单元测试；滚动同步、系统权限、后台投递条件和辅助功能需实机检查。自动化只能证明请求构造与调度结果，不能把 Focus、休眠或系统策略下的实际送达时间当作应用保证。

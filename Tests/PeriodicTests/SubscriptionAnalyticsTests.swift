@@ -33,6 +33,7 @@ struct SubscriptionAnalyticsTests {
         #expect(inputs.contains {
             $0.automaticallyRenews && ($0.expiry.map { $0 > anchor } ?? false)
         })
+        #expect(inputs.count(where: \.reminderEnabled) == 9)
         #expect(inputs.contains { $0.billingKind == .lifetime && $0.expiry == nil })
 
         let datedItems = inputs.compactMap(\.expiry)

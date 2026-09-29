@@ -76,7 +76,7 @@ struct SubscriptionDetailView: View {
                     .foregroundStyle(.secondary)
                 Spacer()
                 if !rows.isEmpty {
-                    Button("添加记录", systemImage: "plus") {
+                    Button("添加记录") {
                         beginPeriodCreation()
                     }
                     .disabled(

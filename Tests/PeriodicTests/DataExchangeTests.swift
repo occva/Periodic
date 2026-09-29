@@ -32,6 +32,55 @@ struct DataExchangeTests {
         }
     }
 
+    @Test func legacySubscriptionWithoutReminderScheduleUsesImportDefaults() throws {
+        let value = try #require(
+            makeSnapshot(
+                reminderAdvanceDays: SubscriptionNotificationSchedule.defaultAdvanceDays,
+                reminderMinuteOfDay: SubscriptionNotificationSchedule.defaultMinuteOfDay
+            ).subscriptions.first
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let encoded = try encoder.encode(value)
+        var object = try #require(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        object.removeValue(forKey: "reminderAdvanceDays")
+        object.removeValue(forKey: "reminderMinuteOfDay")
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(
+            DataPackageSubscription.self,
+            from: JSONSerialization.data(withJSONObject: object)
+        )
+
+        #expect(decoded.reminderAdvanceDays == nil)
+        #expect(decoded.reminderMinuteOfDay == nil)
+        #expect(decoded == value)
+    }
+
+    @MainActor
+    @Test func legacyReminderDefaultsRemainIdempotentAfterImport() async throws {
+        let imported = makeSnapshot(
+            reminderAdvanceDays: nil,
+            reminderMinuteOfDay: nil
+        )
+        let container = try makeContainer()
+        let store = DataExchangeStore(modelContainer: container)
+        let targetDigest = try await store.digest()
+
+        _ = try await store.execute(
+            imported: imported,
+            expectedDigest: targetDigest,
+            conflictResolution: .keepLocal
+        )
+        let preview = try await store.preview(imported: imported)
+
+        #expect(preview.subscriptions.unchanged == 1)
+        #expect(preview.subscriptions.conflicts == 0)
+    }
+
     @MainActor
     @Test func mergeImportIsAtomicAndBecomesIdempotent() async throws {
         let sourceContainer = try makeContainer()
@@ -216,7 +265,10 @@ struct DataExchangeTests {
         #expect(!FileManager.default.fileExists(atPath: storedImage.path))
     }
 
-    private func makeSnapshot() -> DataPackageSnapshot {
+    private func makeSnapshot(
+        reminderAdvanceDays: [Int]? = [7, 3, 1, 0],
+        reminderMinuteOfDay: Int? = 9 * 60
+    ) -> DataPackageSnapshot {
         let subscriptionID = UUID()
         let periodID = UUID()
         let timestamp = Date(timeIntervalSince1970: 1_700_000_000)
@@ -240,6 +292,8 @@ struct DataExchangeTests {
                     currencyScale: 2,
                     note: "Unicode 备注\n第二行",
                     reminderEnabled: true,
+                    reminderAdvanceDays: reminderAdvanceDays,
+                    reminderMinuteOfDay: reminderMinuteOfDay,
                     automaticallyRenews: true,
                     revision: 4,
                     createdAt: timestamp,

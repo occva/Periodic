@@ -211,7 +211,7 @@ struct SubscriptionDomainTests {
         let expiry = try #require(referenceDate.addingDays(1))
         let now = try #require(
             calendar.date(
-                from: DateComponents(year: 2026, month: 9, day: 24, hour: 12)
+                from: DateComponents(year: 2026, month: 9, day: 24, hour: 8)
             )
         )
         let ordinaryReminder = makeRenewingSubscription(
@@ -233,7 +233,7 @@ struct SubscriptionDomainTests {
         #expect(Set(plans.map(\.identifier)).count == plans.count)
     }
 
-    @Test func renewalNotificationIdentityRemainsActiveAfterDeliveryTime() throws {
+    @Test func renewalNotificationBecomesCatchUpAfterDeliveryTime() throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = try #require(TimeZone(identifier: "Asia/Shanghai"))
         let referenceDate = LocalDate(
@@ -249,14 +249,16 @@ struct SubscriptionDomainTests {
             )
         )
 
-        #expect(
-            SubscriptionNotificationPlan.plans(
-                subscriptions: [subscription],
-                referenceDate: referenceDate,
-                calendar: calendar,
-                now: afterDelivery
-            ).isEmpty
+        let plans = SubscriptionNotificationPlan.plans(
+            subscriptions: [subscription],
+            referenceDate: referenceDate,
+            calendar: calendar,
+            now: afterDelivery
         )
+
+        #expect(plans.count == 1)
+        #expect(plans.first?.isCatchUp == true)
+        #expect(plans.first?.remainingDays == 0)
         #expect(
             SubscriptionNotificationPlan.activeIdentifiers(
                 subscriptions: [subscription],
@@ -270,6 +272,91 @@ struct SubscriptionDomainTests {
         )
     }
 
+    @Test func missedAdvanceReminderCatchesUpOnceBeforeExpiry() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try #require(TimeZone(identifier: "Asia/Shanghai"))
+        let referenceDate = LocalDate(
+            try #require(
+                calendar.date(from: DateComponents(year: 2026, month: 9, day: 24))
+            ),
+            calendar: calendar
+        )
+        let expiry = try #require(referenceDate.addingDays(3))
+        let afterDelivery = try #require(
+            calendar.date(
+                from: DateComponents(year: 2026, month: 9, day: 24, hour: 12)
+            )
+        )
+        let subscription = makeRenewingSubscription(
+            expiry: expiry,
+            automaticallyRenews: false,
+            reminderAdvanceDays: [7]
+        )
+        let plans = SubscriptionNotificationPlan.plans(
+            subscriptions: [subscription],
+            referenceDate: referenceDate,
+            calendar: calendar,
+            now: afterDelivery
+        )
+
+        #expect(plans.count == 1)
+        #expect(plans.first?.isCatchUp == true)
+        #expect(plans.first?.advanceDays == 7)
+        #expect(plans.first?.remainingDays == 3)
+        #expect(
+            SubscriptionNotificationPlan.plansRequiringSubmission(
+                plans,
+                observedIdentifiers: [],
+                wasSubmitted: { _ in false }
+            ).count == 1
+        )
+        #expect(
+            SubscriptionNotificationPlan.plansRequiringSubmission(
+                plans,
+                observedIdentifiers: [],
+                wasSubmitted: { _ in true }
+            ).isEmpty
+        )
+    }
+
+    @Test func catchUpUsesOnlyLatestMissedReminderForEachSubscription() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try #require(TimeZone(identifier: "Asia/Shanghai"))
+        let referenceDate = LocalDate(
+            try #require(
+                calendar.date(from: DateComponents(year: 2026, month: 9, day: 24))
+            ),
+            calendar: calendar
+        )
+        let expiry = try #require(referenceDate.addingDays(2))
+        let now = try #require(
+            calendar.date(
+                from: DateComponents(year: 2026, month: 9, day: 24, hour: 12)
+            )
+        )
+        let subscription = makeRenewingSubscription(
+            expiry: expiry,
+            automaticallyRenews: false,
+            reminderAdvanceDays: [7, 3, 1, 0]
+        )
+        let allPlans = SubscriptionNotificationPlan.plans(
+            subscriptions: [subscription],
+            referenceDate: referenceDate,
+            calendar: calendar,
+            now: now
+        )
+        let plansToSubmit = SubscriptionNotificationPlan.plansRequiringSubmission(
+            allPlans,
+            observedIdentifiers: [],
+            wasSubmitted: { _ in false }
+        )
+
+        #expect(allPlans.count == 4)
+        #expect(plansToSubmit.count == 3)
+        #expect(plansToSubmit.filter(\.isCatchUp).map(\.advanceDays) == [3])
+        #expect(plansToSubmit.filter { !$0.isCatchUp }.map(\.advanceDays) == [1, 0])
+    }
+
     @Test func renewalNotificationCleanupOnlyRemovesStaleManagedIdentifiers() {
         let active = SubscriptionNotificationPlan.identifierPrefix + "active"
         let stale = SubscriptionNotificationPlan.identifierPrefix + "stale"
@@ -281,6 +368,123 @@ struct SubscriptionDomainTests {
                 activeIdentifiers: [active]
             ) == [stale]
         )
+    }
+
+    @Test func productionReconciliationRemovesSampleNotificationRequests() {
+        let subscriptionID = UUID()
+        let expiry = LocalDate.today
+        let productionIdentifier = SubscriptionNotificationPlan.identifier(
+            subscriptionID: subscriptionID,
+            expiry: expiry
+        )
+        let sampleIdentifier = SubscriptionNotificationPlan.identifier(
+            subscriptionID: subscriptionID,
+            expiry: expiry,
+            namespace: .sample
+        )
+
+        #expect(productionIdentifier != sampleIdentifier)
+        #expect(
+            SubscriptionNotificationPlan.staleManagedIdentifiers(
+                in: [productionIdentifier, sampleIdentifier, "another-app.notification"],
+                activeIdentifiers: [productionIdentifier],
+                namespace: .production,
+                obsoleteNamespaces: [.sample]
+            ) == [sampleIdentifier]
+        )
+    }
+
+    @MainActor
+    @Test func submittedNotificationHistoryPersistsAndPrunesFingerprints() throws {
+        let suiteName = "SubscriptionNotificationHistoryTests." + UUID().uuidString
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let plan = try #require(
+            SubscriptionNotificationPlan.plans(
+                subscriptions: [makeRenewingSubscription(expiry: .today)],
+                referenceDate: .today,
+                now: .distantPast
+            ).first
+        )
+        let history = SubscriptionNotificationSubmissionHistory(
+            defaults: defaults,
+            key: "submitted"
+        )
+
+        #expect(!history.contains(plan))
+        history.recordSubmission(of: plan)
+        #expect(
+            SubscriptionNotificationSubmissionHistory(
+                defaults: defaults,
+                key: "submitted"
+            ).contains(plan)
+        )
+
+        history.retainActivePlans([])
+        #expect(!history.contains(plan))
+    }
+
+    @MainActor
+    @Test func handledRenewalPeriodSuppressesTheEquivalentExpiryReminder() throws {
+        let suiteName = "HandledSubscriptionPeriodTests." + UUID().uuidString
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let subscriptionID = UUID()
+        let expiry = LocalDate.today
+        let renewalPlan = try #require(
+            SubscriptionNotificationPlan.plans(
+                subscriptions: [
+                    makeRenewingSubscription(
+                        id: subscriptionID,
+                        expiry: expiry,
+                        automaticallyRenews: true
+                    )
+                ],
+                referenceDate: expiry,
+                now: .distantPast
+            ).first
+        )
+        let expiryPlan = try #require(
+            SubscriptionNotificationPlan.plans(
+                subscriptions: [
+                    makeRenewingSubscription(
+                        id: subscriptionID,
+                        expiry: expiry,
+                        automaticallyRenews: false,
+                        reminderAdvanceDays: [0]
+                    )
+                ],
+                referenceDate: expiry,
+                now: .distantPast
+            ).first
+        )
+        let history = SubscriptionNotificationSubmissionHistory(
+            defaults: defaults,
+            key: "submitted"
+        )
+
+        history.recordHandledPeriod(subscriptionID: subscriptionID, expiry: expiry)
+        history.retainActivePlans([expiryPlan])
+
+        #expect(history.contains(renewalPlan))
+        #expect(history.contains(expiryPlan))
+
+        let nextExpiry = try #require(expiry.addingDays(1))
+        let nextPeriodPlan = try #require(
+            SubscriptionNotificationPlan.plans(
+                subscriptions: [
+                    makeRenewingSubscription(
+                        id: subscriptionID,
+                        expiry: nextExpiry,
+                        automaticallyRenews: false,
+                        reminderAdvanceDays: [0]
+                    )
+                ],
+                referenceDate: expiry,
+                now: .distantPast
+            ).first
+        )
+        #expect(!history.contains(nextPeriodPlan))
     }
 
     @Test func notificationCapacityKeepsTheNearestPlans() throws {
@@ -317,6 +521,70 @@ struct SubscriptionDomainTests {
                     (lhs ?? .distantFuture) < (rhs ?? .distantFuture)
                 }
         )
+    }
+
+    @Test func reconciliationKeepsExistingPendingPlansWithinCapacity() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try #require(TimeZone(identifier: "Asia/Shanghai"))
+        let referenceDate = try LocalDate(iso8601Text: "2026-09-24")
+        let subscriptions = (1...3).map { offset in
+            makeRenewingSubscription(
+                expiry: LocalDate(dayNumber: referenceDate.dayNumber + offset)
+            )
+        }
+        let plans = SubscriptionNotificationPlan.plans(
+            subscriptions: subscriptions,
+            referenceDate: referenceDate,
+            calendar: calendar,
+            now: .distantPast
+        )
+        let existingIdentifier = try #require(plans.first?.identifier)
+
+        let selection = SubscriptionNotificationPlan.reconciliationSelection(
+            from: plans,
+            currentPendingIdentifiers: [existingIdentifier],
+            observedIdentifiers: [existingIdentifier],
+            reservedPendingCount: 0,
+            wasSubmitted: { $0.identifier == existingIdentifier }
+        )
+
+        #expect(selection.pendingIdentifiersToKeep == [existingIdentifier])
+        #expect(selection.plansToSubmit.count == 2)
+        #expect(selection.expectedFutureIdentifiers == Set(plans.map(\.identifier)))
+        #expect(selection.deferredCount == 0)
+    }
+
+    @Test func reconciliationCapacityIncludesExistingPendingPlans() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try #require(TimeZone(identifier: "Asia/Shanghai"))
+        let referenceDate = try LocalDate(iso8601Text: "2026-09-24")
+        let subscriptions = (1...4).map { offset in
+            makeRenewingSubscription(
+                expiry: LocalDate(dayNumber: referenceDate.dayNumber + offset)
+            )
+        }
+        let plans = SubscriptionNotificationPlan.plans(
+            subscriptions: subscriptions,
+            referenceDate: referenceDate,
+            calendar: calendar,
+            now: .distantPast
+        )
+        let existingIdentifiers = Set(plans.dropFirst().map(\.identifier))
+
+        let selection = SubscriptionNotificationPlan.reconciliationSelection(
+            from: plans,
+            currentPendingIdentifiers: existingIdentifiers,
+            observedIdentifiers: existingIdentifiers,
+            reservedPendingCount: 1,
+            capacity: 4,
+            wasSubmitted: { existingIdentifiers.contains($0.identifier) }
+        )
+
+        #expect(selection.expectedFutureIdentifiers.count == 3)
+        #expect(selection.plansToSubmit.map(\.identifier) == [plans[0].identifier])
+        #expect(selection.pendingIdentifiersToKeep.count == 2)
+        #expect(!selection.pendingIdentifiersToKeep.contains(plans[3].identifier))
+        #expect(selection.deferredCount == 1)
     }
 
     @MainActor
@@ -420,6 +688,60 @@ struct SubscriptionDomainTests {
         #expect(updated.expiry == expiry)
         #expect(updated.revision == current.revision + 1)
         #expect(try await store.fetchPeriods(for: current.id) == periodsBefore)
+    }
+
+    @MainActor
+    @Test func markingNotRenewedThroughServicesRecordsTheHandledExpiryPeriod() async throws {
+        let suiteName = "HandledNonRenewalServiceTests." + UUID().uuidString
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let services = AppServices(inMemory: true, defaults: defaults)
+        let store = try #require(services.subscriptionStore)
+        let expiry = LocalDate.today
+        let input = SubscriptionCreateInput(
+            id: UUID(),
+            name: "Handled Renewal",
+            symbolName: "arrow.clockwise",
+            iconResourceName: nil,
+            iconURLString: nil,
+            category: .tools,
+            managementState: .active,
+            billingKind: .recurring,
+            periodStart: expiry.addingDays(-29),
+            expiry: expiry,
+            cycleMonths: 1,
+            money: Money(minorUnits: 2_000, currency: .usd),
+            note: "",
+            reminderEnabled: true,
+            reminderAdvanceDays: [0],
+            automaticallyRenews: true
+        )
+        _ = try await store.create(input)
+        let current = try #require(try await store.fetchAll().first)
+
+        try await services.markAutomaticRenewalNotRenewed(
+            SubscriptionNonRenewalRequest(
+                subscriptionID: current.id,
+                expectedRevision: current.revision,
+                expectedExpiry: expiry
+            ),
+            referenceDate: expiry
+        )
+
+        let updated = try #require(try await store.fetchAll().first)
+        let expiryPlan = try #require(
+            SubscriptionNotificationPlan.plans(
+                subscriptions: [updated],
+                referenceDate: expiry,
+                now: .distantPast,
+                namespace: .sample
+            ).first
+        )
+        let history = SubscriptionNotificationSubmissionHistory(
+            defaults: defaults,
+            key: PreferenceKey.submittedSampleNotificationRequests
+        )
+        #expect(history.contains(expiryPlan))
     }
 
     @MainActor
@@ -956,11 +1278,13 @@ struct SubscriptionDomainTests {
     }
 
     private func makeRenewingSubscription(
+        id: UUID = UUID(),
         expiry: LocalDate,
-        automaticallyRenews: Bool = true
+        automaticallyRenews: Bool = true,
+        reminderAdvanceDays: [Int] = SubscriptionNotificationSchedule.defaultAdvanceDays
     ) -> SubscriptionDTO {
         SubscriptionDTO(
-            id: UUID(),
+            id: id,
             name: "Renewing",
             symbolName: "arrow.clockwise",
             iconResourceName: nil,
@@ -974,6 +1298,7 @@ struct SubscriptionDomainTests {
             money: Money(minorUnits: 2_000, currency: .usd),
             note: "",
             reminderEnabled: true,
+            reminderAdvanceDays: reminderAdvanceDays,
             automaticallyRenews: automaticallyRenews,
             revision: 1,
             createdAt: .now,

@@ -57,8 +57,10 @@ struct ContentView: View {
             onDismiss: { session.dismissEditor() }
         ) {
             let existing = session.editingSubscription
+            let duplicate = session.duplicatingSubscription
             SubscriptionEditorView(
                 subscription: existing,
+                duplicate: duplicate,
                 preset: existing == nil ? session.subscriptionEditorPreset : nil
             ) { input, historyPolicy in
                 guard let store = services.subscriptionStore else {
@@ -71,7 +73,12 @@ struct ContentView: View {
                         historyPolicy: historyPolicy
                     )
                 } else {
-                    _ = try await store.create(input)
+                    _ = try await store.create(
+                        input,
+                        historyPolicy: duplicate == nil
+                            ? .recordInitialPeriod
+                            : .skipInitialPeriod
+                    )
                 }
                 services.notifySubscriptionDataChanged()
                 await session.reload(using: services)
@@ -125,19 +132,11 @@ struct ContentView: View {
                         await session.reload(using: services)
                     },
                     confirmAutomaticRenewal: { request in
-                        guard let store = services.subscriptionStore else {
-                            throw ContentViewError.storeUnavailable
-                        }
-                        _ = try await store.confirmAutomaticRenewal(request)
-                        services.notifySubscriptionDataChanged()
+                        _ = try await services.confirmAutomaticRenewal(request)
                         await session.reload(using: services)
                     },
                     markAutomaticRenewalNotRenewed: { request in
-                        guard let store = services.subscriptionStore else {
-                            throw ContentViewError.storeUnavailable
-                        }
-                        try await store.markAutomaticRenewalNotRenewed(request)
-                        services.notifySubscriptionDataChanged()
+                        try await services.markAutomaticRenewalNotRenewed(request)
                         await session.reload(using: services)
                     }
                 )
@@ -183,19 +182,11 @@ struct ContentView: View {
                 referenceDate: session.referenceDate,
                 previewRenewal: session.renewalPreview(for:),
                 confirmRenewal: { request in
-                    guard let store = services.subscriptionStore else {
-                        throw ContentViewError.storeUnavailable
-                    }
-                    _ = try await store.confirmAutomaticRenewal(request)
-                    services.notifySubscriptionDataChanged()
+                    _ = try await services.confirmAutomaticRenewal(request)
                     await session.reload(using: services)
                 },
                 markNotRenewed: { request in
-                    guard let store = services.subscriptionStore else {
-                        throw ContentViewError.storeUnavailable
-                    }
-                    try await store.markAutomaticRenewalNotRenewed(request)
-                    services.notifySubscriptionDataChanged()
+                    try await services.markAutomaticRenewalNotRenewed(request)
                     await session.reload(using: services)
                 },
                 onDetails: { id in

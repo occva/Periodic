@@ -157,4 +157,5 @@ struct SubscriptionListItem: Identifiable, Hashable, Sendable {
         guard billingKindValue == .recurring, let cycleMonths else { return "—" }
         return money.annualEstimate(cycleMonths: cycleMonths, style: style)
     }
+
 }

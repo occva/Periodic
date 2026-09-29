@@ -61,6 +61,8 @@ managementState == inactive → 已停用
 
 分类图针对选择币种的有效 recurring，按固定 ServiceCategory 汇总年化金额。终生一次性价格不入该图。默认 CNY，即使 CNY 暂无参与数据也显示空态，允许选择有数据币种，不悄悄更换口径。
 
+分类明细可逐项展开或收起；点击分类卡片标题可一次展开当前全部分类，标题操作需保留键盘与 VoiceOver 语义。多列展示时按分类块的实际高度依次放入当前最短列，窗口宽度或展开状态变化后自动重新平衡；同一分类及其明细不得拆分到不同列。
+
 主图可采用水平条形图，旁边列出类型、金额和占比。占比由未舍入类别金额 / 未舍入币种总额计算，显示一位小数；因四舍五入产生的总和 99.9% / 100.1% 是显示误差，不修改金额补差。总额为 0 或无有效记录时不计算占比，不画虚假满圆/等分图。转换 Double 仅发生在图形位置，文本与汇总仍用 Decimal。
 
 ### 2.4 实际支出与付款明细
@@ -89,9 +91,9 @@ DataChange、共享 today 或用户切换范围/币种触发重新计算。缓�
 
 下钻在统计页面自己的 Sheet/详情区域完成，不写 WindowSession.filter；返回保留范围、币种和滚动位置。数据变化导致当前条目离开集合时明确提示并刷新；不为了保留列表强行改业务状态。
 
-从下钻列表再打开订阅详情时，使用 Tab1 共用详情并默认历史当年；仪表盘付款日期范围不隐式传给详情年份。若直接点击一笔付款“纠正”，以 paymentID 打开该付款编辑，不先按当年过滤掉它。返回保持统计原范围。
+从下钻列表再打开订阅详情时，使用 Tab1 共用详情并全量展示历史；仪表盘付款日期范围不传给详情。若直接点击一笔付款“纠正”，以 paymentID 打开该付款编辑。返回保持统计原范围。
 
-详情的周期年筛选按覆盖区间相交，统计/详情实付按付款日，所以跨年周期可在两年显示，但一笔付款只在付款年统计。主仪表盘本月/本年/自选范围保持原定义，不因为详情出现年份栏而改成周期年归属。
+详情中的跨年周期只显示一次并保留完整区间；统计实付仍按付款日归属。主仪表盘本月/本年/自选范围保持原定义，不受详情全量历史影响。
 
 ## 3. 数据库与统计字段
 
@@ -137,9 +139,6 @@ subscriptions、payments、icon_assets 的完整逐字段约束沿用 Tab1 第 4
 | --- | --- | --- | --- |
 | id | String | main | 唯一单例，不接受外部任意 ID |
 | appearanceRaw | String | system | system / light / dark |
-| notificationsEnabled | Bool | false | 全局提醒意图，不等于授权 |
-| reminderOffsetsData | Data | JSON `[0,1,3,7]` | 非负整数、去重、升序；空列表表示无时间点 |
-| reminderMinuteOfDay | Int | 540 | 0…1439，本地时分 |
 | viewPreferencesData | Data | ViewPreferencesV1 JSON | 固定结构，有版本且严格解码 |
 | revision | Int64 | 1 | 每次设置事务增加，防多窗口覆盖 |
 | updatedAt | Date | 提交时间 | 审计字段，恢复保留备份值 |
@@ -159,17 +158,17 @@ subscriptions、payments、icon_assets 的完整逐字段约束沿用 Tab1 第 4
 
 尺寸/侧边栏在最近活动主窗口布局稳定后去重、合并写入，不每个像素移动都更新数据库。已有窗口保留自己的 SceneStorage；设置偏好用作新窗口及恢复后的默认，不强制把所有窗口改成同样状态。
 
-外观数据库值为事实来源，现有 AppStorage 仅作镜像。会话筛选、临期 N、组折叠、草稿、统计范围、详情年份/子视图、时间线中心及系统私有窗口恢复存档不备份；列配置和默认分组仍是可备份偏好。详情新打开总是 currentYear，不恢复某个旧年份。
+外观数据库值为事实来源，现有 AppStorage 仅作镜像。会话筛选、临期 N、组折叠、草稿、统计范围、详情子视图、时间线中心及系统私有窗口恢复存档不备份；列配置和默认分组仍是可备份偏好。
 
 ### 4.2 设置窗口
 
 | 分区 | 内容 | 保存方式 |
 | --- | --- | --- |
 | 通用 | 跟随系统/浅色/深色、视图默认偏好 | 外观即时提交；其余去重或显式保存 |
-| 提醒 | 全局开关、提前天数、本地时间、权限和调度状态 | 参数校验后一次提交，用户主动开启才请求授权 |
+| 系统通知 | 本机权限、调度状态、重新安排、打开系统设置 | 只显示系统适配状态；单条计划在订阅编辑器配置，用户明确点击才请求授权 |
 | 数据 | `.periodicdata` 导入、完整备份导出 | 校验、预览并确认；不展示未实现功能 |
 
-设置接口使用 typed patch，只改当前操作字段，避免更改外观时覆盖其他窗口刚改的提醒。系统授权行为及 NotificationReport 详见 Tab2 第 6 节。
+设置接口使用 typed patch，只改当前操作字段。系统授权行为及 NotificationReport 详见 Tab2 第 6 节；权限不进入设置表和数据包。
 
 ## 5. 统计和设置接口
 
@@ -191,7 +190,7 @@ protocol SettingsService: Sendable {
 | DateRange | start:LocalDate、end:LocalDate，包含两端；start ≤ end |
 | DashboardSnapshot | version、asOfDay、dueHorizonDays、counts、estimates、expiring、categoryBreakdown、spending、paymentDetails、subscriptionRows；后者用于数量/类别下钻 |
 | DashboardDrilldown | counts(bucket/subtype?) / estimate(currency) / category(currency,category) / spending(currency,range)；从同一快照筛选，不改共享 filter |
-| SettingsSnapshot | version、settingsRevision、appearance、ReminderPreferences、ViewPreferencesV1 |
+| SettingsSnapshot | version、settingsRevision、appearance、ViewPreferencesV1 |
 | UpdateSettings | expectedSettingsRevision、SettingsPatch；按字段修改，保留未指定字段 |
 | SettingsPatch | appearance?、reminderPreferences?、viewPreferences?；nil 表示不修改，列表为空与未修改不同 |
 
@@ -349,7 +348,7 @@ Assets/<iconID>.png
 | payments.json | BackupPaymentV1 数组 | 包含每笔付款快照、父 UUID、revision 和审计时间 |
 | templates.json | BackupTemplateV1 数组 | 全部用户模板字段、图片引用、revision、审计时间；不包含内置目录 |
 | icons.json | BackupIconV1 数组 | id、relativePath、sha256、mimeType、byteCount、pixelWidth、pixelHeight、createdAt |
-| settings.json | BackupSettingsV1 | id=main、appearance、ReminderPreferences、ViewPreferencesV1、revision、updatedAt |
+| settings.json | BackupSettingsV1 | id=main、appearance、ViewPreferencesV1、revision、updatedAt |
 
 BackupSubscriptionV1 的完整键：`id,name,symbolName,iconAssetID,category,managementState,billingKind,periodStart,expiryDate,cycleMonths,periodPrice,note,reminderEnabled,revision,createdAt,updatedAt`。lifetime 的 expiryDate/cycleMonths 为 null，reminderEnabled=false；periodPrice 沿用键名，此时表示一次性价格。
 
@@ -430,7 +429,7 @@ Application Support/Periodic/
 
 清空预览列明订阅、周期、付款、用户模板、图片及设置并提供备份。普通删除订阅会删其周期/付款但不删模板；完整清空删除全部用户历史和模板，内置目录保留。
 
-使用同一 DatasetCoordinator 创建空候选数据集及默认设置，验证后原子切换。成功后打开表格空态、全局提醒关闭、外观跟随系统，取消本应用待发送请求；系统授权保持本机原状，不尝试撤销。旧图片和数据集清理失败单独提示，后续启动重试，并明确不能保证对磁盘介质做安全擦除。
+使用同一 DatasetCoordinator 创建空候选数据集及默认设置，验证后原子切换。成功后打开表格空态、外观跟随系统，并因没有订阅而取消本应用待发送请求；系统授权保持本机原状，不尝试撤销。旧图片和数据集清理失败单独提示，后续启动重试，并明确不能保证对磁盘介质做安全擦除。
 
 清空预览与恢复预览都绑定全库版本；维护期间禁止提交旧编辑、CSV 和设置修改。旧数据集的 MutationContext 永久不适用于新数据集。
 
@@ -511,9 +510,9 @@ planID 指向服务端已验证临时内容，不允许 UI 拼接数据库路径
 | 终生数据包 | billingKind、cycle/expiry、reminder 和冲突字段按领域规则往返 | AC-28 |
 | 模板导入 | 用户模板 UUID、建议金额、别名及共享图片完整恢复 | AC-28 |
 | 统计下钻 | 数量列表、图表参与者、币种实付明细均与同版本口径相等；返回不改共享 filter | AC-29 |
-| 周期与实付 | 跨年周期两年可见但实际支出只按付款年；手动周期报价不进入实付，删周期保留付款 | AC-31～33、AC-35 |
-| 历史备份 | periods.json 和可选 periodRecordID 正确往返；孤儿或跨订阅关联拒绝；跨年不复制；清空数量准确 | AC-36 |
+| 周期与实付 | 跨年周期只显示一次且实际支出只按付款日；手动周期报价不进入实付，删周期保留付款 | AC-31～34 |
+| 历史备份 | periods.json 和可选 periodRecordID 正确往返；孤儿或跨订阅关联拒绝；跨年不复制；清空数量准确 | AC-35 |
 
 统计、编码和事务采用隔离数据集的自动化测试；文件写入/替换、权限、取消与恢复使用临时沙盒故障注入，不能在用户正式库演练删除。最终在 macOS 26 实机或对应环境完成主要 UI、文件权限和系统提醒联合验收。
 
-三份文档共同覆盖需求 AC-01～AC-36。文档完成不等于业务验收通过；开发时每个模块须记录实际测试结果后再标记完成。
+三份文档共同覆盖需求 AC-01～AC-35。文档完成不等于业务验收通过；开发时每个模块须记录实际测试结果后再标记完成。

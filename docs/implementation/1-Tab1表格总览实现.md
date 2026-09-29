@@ -14,7 +14,7 @@
 | TABLE-01～09、NAV-05～08 | 表格、快捷视图、分组、组合筛选、排序、底栏 | subscriptions；`SubscriptionService.query` | 可查、可选、金额口径清楚 |
 | CATALOG-01～06 | 内置/自建服务模板、预填、维护 | 本地目录 + service_templates；TemplateService | 选模板后确认表单，不自动产生订阅 |
 | DATA-05～06、EDIT-05、RENEW-05 | 周期/终生类型、一次性价格 | billingKind + 可空 cycleMonths；维护及派生规则 | 终生不续费、不提醒、不折算费用 |
-| DETAIL-01～08、PERIOD-01～07、NAV-09 | 共享详情、手动周期、按年历史 | subscription_periods + payments 可选关联；PeriodService | 默认当年；周期、报价、实付分别有据可查 |
+| DETAIL-01～05、PERIOD-01～06、NAV-09 | 共享详情、手动周期、全量历史 | subscription_periods + payments 可选关联；PeriodService | 周期、报价、实付分别有据可查 |
 | DATA-01～04、EDIT-01～04 | 共享表单、详情、图片、付款历史 | subscriptions / payments / icon_assets；维护服务 | 当前资料与历史快照互不覆盖 |
 | RENEW-01～04 | 确认续费 | `previewRenewal`、`renew` | 一次提交更新周期并新增一笔付款 |
 | LIFE-01～04 | 复制、停用、恢复、单条和批量删除 | `copyDraft`、`setState`、`previewDeletion`、`delete` | 删除影响明确，取消无写入 |
@@ -39,8 +39,8 @@
 | 服务库搜索/分类/来源 | TemplatePickerStore | 独立于已有记录筛选，关闭服务库后可重置 |
 | 表格排序、多选 ID、当前弹窗 | OverviewStore / 窗口路由 | 会话状态 |
 | 编辑草稿、字段错误、保存状态 | 当前表单 | 值类型；取消时丢弃 |
-| 详情年份、历史子视图、局部滚动 | SubscriptionDetailStore | 每次打开默认当年，编辑返回保留；不写全局偏好或主页面筛选 |
-| 外观、提醒、视图默认偏好 | SettingsStore | 同库 app_settings；外观可单向镜像至现有 AppStorage |
+| 详情历史子视图、局部滚动 | SubscriptionDetailStore | 全量展示历史，编辑返回保留；不写全局偏好或主页面筛选 |
+| 外观、视图默认偏好 | SettingsStore | 同库 app_settings；外观可单向镜像至现有 AppStorage |
 
 ## 2. 功能与交互设计
 
@@ -69,7 +69,7 @@
 1. 搜索仅匹配名称：搜索词去除首尾空白，忽略大小写，保留用户名称内的其他字符；使用统一 Unicode 比较实现。
 2. 筛选维度为管理状态、到期状态、服务类型、计费类型、币种。每个维度可选多值，维度内为“或”，维度间为“且”；空集合代表全部。日期未知只匹配无日期 recurring，永久有效只匹配 lifetime。
 3. 默认按到期日升序，再按名称及 UUID 稳定排序；日期或天数降序时无日期仍置后。
-4. 年化排序先按币种代码升序分组，再按该币种内未舍入年化值升降序，终生的 nil 在本币种组内始终置后，最后以名称及 UUID 打破相同值。单币种筛选时自然只剩一个组。
+4. 金额排序先按币种代码升序分组，再按该币种内当前周期价格升降序；终生项目使用一次性价格，不作年化折算。最后以名称及 UUID 打破相同值，单币种筛选时自然只剩一个组。
 5. Tab2 复用搜索筛选条件，但保持自己的日期升序；Tab3 始终读取全库。
 6. 搜索可约 150 ms 防抖。快速变更时取消旧任务，并以请求序号防止迟到响应覆盖新结果。
 7. 结果刷新后，多选集与当前结果 ID 取交集；批量动作只处理仍可见的选择，不隐式操作被筛掉的项目。
@@ -88,7 +88,7 @@
 
 所有条件以标签显示；快捷视图与条件不再一致时选中“自定义”，不能仍显示错误的“全部”。需要查所有过期（含停用）可手动取消 active 限制。
 
-分组为 none/category/managementState。服务类型按固定分类顺序，管理状态按 active、inactive；组内沿用表格排序。分组头显示结果数、有效周期预估及各币种小计。折叠只是隐藏行，不排除底栏或“当前结果导出”；“全选当前结果”覆盖折叠行并明确总选择数量。`TableSnapshot` 返回平铺 rows 和 groups 的行 ID 映射，两者来自同一查询。
+分组为 none/category/managementState。服务类型按固定分类顺序，管理状态按 active、inactive；组内沿用表格排序。分组头显示结果数及当前周期价格/终生一次性价格的各币种小计，不作年化折算。折叠只是隐藏行，不排除底栏或“当前结果导出”；“全选当前结果”覆盖折叠行并明确总选择数量。`TableSnapshot` 返回平铺 rows 和 groups 的行 ID 映射，两者来自同一查询。
 
 列 ID 使用稳定键，可显隐和调宽，名称列强制可见；提供恢复默认。UI 技术优先验证 Table 分组 API；若原生 Table 无法满足可访问的分组头，使用带共享列规格的分组容器，不能因技术选择丢失列对齐、键盘多选和横向滚动。分组/列配置写入 Tab3 视图偏好，查询事实不变。
 
@@ -103,12 +103,12 @@
 | 有效期 | recurring 起止可空；lifetime 开始日可空、到期强制空 | 周期起止齐全 start ≤ end；终生显示永久有效 |
 | 预估 | 月均、年化 | 周期草稿实时计算；不完整/终生显示“—” |
 | 图标 | 内置 PNG/JPEG、Apple 图标或未设置 | 已设置的图标不可用时显示不可用状态，不替换成 SF Symbol；只有未设置图标时稳定选择一个 SF Symbol 占位 |
-| 提醒与备注 | 周期单条提醒默认开启；终生固定关闭、隐藏时间提醒输入；备注空 | 周期还受全局开关和权限约束 |
+| 提醒与备注 | 周期单条提醒默认开启，默认提前 1 天的 09:00；终生固定关闭并隐藏提醒输入；备注空 | 使用下拉菜单选择提前 1 天、3 天、7 天或自定义时间；仅自定义时显示系统日期时间选择器；系统权限不属于订阅业务数据 |
 | 首次付款（仅新建） | “同时登记首次付款”默认未勾选 | 勾选才显示并校验付款字段，和订阅同事务保存 |
 
 首次付款日期默认今天，金额和币种可从当前价格预填但允许独立修改，覆盖周期默认使用当前起止日期，未知可空。取消勾选不提交隐藏草稿。普通编辑不生成付款记录。
 
-普通新建/从模板新建在日期足够完整时，同事务写一条 initial 周期（recurring 起止齐全）；lifetime 始终自动写一条记录，开始日使用用户输入或创建日，历史结束日默认 `2099-12-31`。默认日期不写入订阅 expiry，也不改变永久有效语义，用户可在历史记录中修改该结束日。金额为当前报价快照。可选首次付款关联该条周期。周期型日期不足时不制造周期，付款可以无周期关联。复制终生项目仍按统一规则生成终生记录，但不复制原历史；数据包导入只恢复包内明确存在的历史。
+普通新建/从模板新建在日期足够完整时，同事务写一条 initial 周期（recurring 起止齐全）；lifetime 始终自动写一条记录，开始日使用用户输入或创建日，历史结束日默认 `2099-12-31`。默认日期不写入订阅 expiry，也不改变永久有效语义，用户可在历史记录中修改该结束日。金额为当前报价快照。可选首次付款关联该条周期。周期型日期不足时不制造周期，付款可以无周期关联。复制任何项目都不生成周期历史；数据包导入只恢复包内明确存在的历史。
 
 编辑后仍为周期订阅，且计费类型、周期、开始日或到期日发生变化时，保存前提供“更新并添加周期记录 / 仅更新当前设置 / 返回编辑”。添加选项保存修改后的类型、周期、完整起止日期及当前报价快照；日期不完整时说明原因并只提供更新当前设置或返回补充。订阅更新和可选周期记录必须使用同一个 Store 事务及同一个 expectedRevision，不能先更新再调用独立的历史写入。切换为终生仍按终生历史规则处理，不显示周期订阅记录选项。
 
@@ -119,38 +119,19 @@
 ### 2.3.1 共享详情布局与打开行为
 
 ```text
-大图标 + 名称 + 管理状态       编辑 / 设置当前周期 / 续费 / 更多 / 关闭
-基础资料：当前价格、计费方式、开始/到期、服务类型、提醒、备注
-只读指标：到期标签、剩余天数/比例、月均预估、年化预估
-历史区年份栏：上一年 | 2026 年（默认当年）▼ | 下一年 | 当年 | 全部年份
-历史子视图：周期记录 | 付款记录       手动添加周期 / 补录付款
+图标 + 名称 + 管理状态                         编辑 / 续费
 周期表：次数 | 周期类型 | 开始 | 结束 | 本期价格 | 关联付款数 | 备注 | 操作
 付款表：付款日 | 类型 | 实付/币种 | 覆盖日期 | 关联周期 | 备注 | 操作
-历史摘要：本次匹配周期数 / 总周期数；所选年实付（按付款日、分币种）
+底栏：总记录数                              添加记录 | 关闭
 ```
 
-截图用于内容层级，产品采用可缩放的原生 Sheet，内容可滚动、表头清晰。图片区可换图标，当前资料编辑通过共享表单；计算区不提供输入控件。截图“消费金额”改为“每周期价格/一次性价格”，另设“累计已记录实付”和“所选年已记录实付”，不能都称消费金额。
+详情保持 `960 × 560` 的原生 Sheet 和原有表格、底栏间距，不重复展示主列表和编辑表单已有的当前资料、预估与备注。操作统一使用文字按钮，不在文字旁重复显示图标；当前资料通过“编辑订阅”进入共享表单。
 
-列表、日历点/标签、临期卡片、通知和统计记录详情均传同一 subscriptionID。关闭恢复来源页位置及条件，不因详情默认年份而改变时间轴范围。直接编辑菜单仍可跳到编辑子状态，保存或取消后回到原详情/来源。
+列表、日历点/标签、临期卡片、通知和统计记录详情均传同一 subscriptionID。关闭恢复来源页位置及条件。直接编辑菜单仍可跳到编辑子状态，保存或取消后回到原详情/来源。
 
-### 2.3.2 年份切换与跨年归属
+### 2.3.2 全量历史与跨年归属
 
-`HistoryYearSelection = currentYear / year(Int) / all`，默认 currentYear，以共享 Clock 的系统时区公历年解析。历史区两个子视图共用选择；顶部当前资料、状态与折算值始终按真实今天计算。
-
-周期匹配选定年：普通/自定义周期 `startDay ≤ Dec31 && endDay ≥ Jan1`；终生记录只按 startDay 在该年内。付款匹配同订阅且 paymentDay 在该年内，与周期是否匹配无关。因此 2025-12-15～2026-01-14 的周期在两年都可见且显示完整日期，但 2025-12-15 的实付只计 2025；不按天数分摊报价或实付。
-
-年份菜单包含当前年、周期实际覆盖年份和付款年份，支持上一年/下一年访问没有记录的年份，边界 1…9999；“全部”时上/下一年禁用，点当年或选具体年后恢复。超长区间的年份菜单虚拟化生成，不向数据库写每年副本。
-
-默认 currentYear 跨元旦自动更新；手选 year(2025) 保持 2025。同次详情中切换历史子视图、编辑保存、刷新数据均保留年份，真正关闭再进入重置默认。年份切换期间若正在编辑则先处理未保存草稿，不默默丢弃输入。请求 generation 保证快速切年旧响应不覆盖新年。
-
-当年无历史展示空态和“查看全部年份 / 添加周期”，不自动选最近有记录的旧年。新增保存到其他年时提供跳转提示，默认保留当前筛选。跨年周期只算一条全量周期；表内序号先在全量记录按 startDay/createdAt/UUID 升序生成，年份过滤与显示倒序后保留该序号。补录更早历史可能改变显示序号，操作始终使用 UUID。
-
-| 样例（假设当前 2026 年） | 2026 年周期表 | 2026 年实付 |
-| --- | --- | --- |
-| 2025-12-15～2026-01-14，2025-12-15 付款 CNY 30 | 显示完整跨年周期 | 不计入，付款在 2025 年 |
-| 2026-06-01～2027-05-31，只记录报价 CNY 99 | 显示完整跨年周期 | 没有付款，不增加支出 |
-| 2024-05-01 取得终生，2024 年付款 CNY 199 | 不显示；切 2024/全部可见 | 不计入；顶部仍可显示永久有效 |
-| 只有 2023 年周期/付款 | 当年空态，保留默认 2026 | 显示当年无付款，累计仍可查询 |
+详情不提供年份筛选，周期与付款历史始终全量展示。跨年周期显示完整起止日期及“跨年”，底层只保留一条记录，不按年份复制；付款仍按真实付款日保存，不按周期跨度分摊。表内序号在全量记录中按稳定顺序生成，补录更早历史可能改变显示序号，操作始终使用 UUID。
 
 ### 2.3.3 手动维护周期与当前设置的关系
 
@@ -158,17 +139,15 @@
 
 普通/自定义开始结束必填且 start≤end；终生只填开始。默认结束建议为 start 加 1/3/6/12 月减一天，可改；按续费入口生成的建议仍遵守 Tab1 第 5.3 节。相邻段首尾都包含，重叠给提示并要求确认，允许记录服务赠送或重复购买，不擅自合并。未来周期可登记，勾选付款时 paymentDate 仍不得晚于今天。
 
-手动新增/编辑只保存历史，不改主表格/主日历的当前周期及提醒。详情底部始终提供“添加记录”，空状态中也提供同一入口；点击后在表格中追加一条行内草稿。周期表支持双击行或使用操作列进入行内编辑；周期、开始、结束、金额和币种先写入独立草稿，用户明确保存后才作为一项事务提交，取消不产生写入，失败保留草稿。点击“应用到当前设置”另行预览：复制开始/结束及类型，预设周期带入对应 M，custom 需用户选择 1/3/6/12；lifetime 清周期/到期并关闭提醒。默认保留当前价格、币种和管理状态，可明确选择采用已知本期价格或恢复 active。周期型应用保留原提醒意图；从 lifetime 变 recurring 时仍默认保持 false，用户可主动开启。
+手动新增/编辑只保存历史，不改主表格/主日历的当前周期及提醒。详情底栏始终提供“添加记录”，空状态复用同一入口；点击后在表格中追加一条行内草稿。周期表支持双击行或使用操作列进入行内编辑；周期、开始、结束、金额和币种先写入独立草稿，用户明确保存后才作为一项事务提交，取消不产生写入，失败保留草稿。当前订阅字段只通过“编辑订阅”修改；历史记录不提供覆盖当前设置的入口。
 
-应用成功只改 subscriptions 当前事实，发布变更并重新调度；不新增周期/付款，也不建立历史到当前的持续同步关系。后续修正/删除该历史行不再改当前事实。详情“设置当前周期”打开相同预览编辑流程，直接调整当前字段同样不自动补历史；如需要留历史，使用显式“添加周期记录”。
-
-删除周期确认列明关联付款数，说明只删周期、解除关联，付款快照及当前日期保留；付款删除从付款视图另行确认。纠正周期价格不改实付；纠正付款不改周期报价。查看某周期关联付款时显示该周期全部已关联付款，并明确“全部付款年份”，不受当前年份隐藏跨年关联。
+删除周期确认列明关联付款数，说明只删周期、解除关联，付款快照及当前日期保留；付款删除从付款视图另行确认。纠正周期价格不改实付；纠正付款不改周期报价。查看某周期关联付款时显示该周期全部已关联付款。
 
 ### 2.4 续费、复制和付款维护
 
 **续费**只适用 recurring，先读取最新记录，预填付款日、实付、新周期及备注，允许用户调整。无论原管理状态如何，只要原到期日不早于今天，就以原到期日续接；保存后恢复为订阅中。lifetime 详情/右键隐藏续费，服务返回 unsupportedOperation 防止旧入口绕过。默认日期算法见第 5 节。
 
-保存续费必须一次提交：新增 renewal 周期、创建关联付款、更新当前周期、设为 active、递增版本及回执。周期报价记录原当前价格，付款记录用户确认的实付；两者可不同，未来价格不受实付覆盖。保存成功三个页面均刷新，详情保留当前历史年份。
+保存续费必须一次提交：新增 renewal 周期、创建关联付款、更新当前周期、设为 active、递增版本及回执。周期报价记录原当前价格，付款记录用户确认的实付；两者可不同，未来价格不受实付覆盖。保存成功三个页面均刷新，详情重新加载全量历史。
 
 **复制**只产生一个预填新建草稿：新 UUID、名称追加“副本”、继承当前字段与可共享图标，首次付款默认未勾选，不复制历史。放弃草稿不会产生记录。
 
@@ -232,7 +211,7 @@
 | payments | PaymentRecord | 必须属于一条订阅；订阅删除 cascade | 本文 4.3 |
 | icon_assets | IconAssetRecord | 一张图片可被多个订阅共享；删除关系 nullify | 本文 4.4 |
 | service_templates | ServiceTemplateRecord | 用户自建模板；可选共享图片，生成订阅后无外键联动 | 本文 4.6 |
-| app_settings | AppSettingsRecord | 唯一 main；外观、提醒、视图默认值 | Tab3 第 4 节；提醒子集见 Tab2 |
+| app_settings | AppSettingsRecord | 唯一 main；外观、视图默认值 | Tab3 第 4 节；不保存系统通知权限 |
 | store_metadata | StoreMetadataRecord | 唯一 main；数据集身份和版本 | 本文 4.5 |
 | mutation_receipts | MutationReceiptRecord | 操作回执，避免同次续费重试产生多笔付款 | 本文 4.5 |
 
@@ -500,8 +479,8 @@ protocol SubscriptionService: Sendable {
 | TableQuery | filter、sort、grouping、today | today 来自共享 Clock；不读另一窗口筛选 |
 | TableSnapshot | version、asOfDay、rows、groups、matchedCount、totalCount、bucketCounts、forecastCounts、effectiveTotalsByCurrency | 所有计数和底栏来自同一快照；费用仅 isForecastEligible |
 | TableGroup | key、title、rowIDs、count、forecastCounts、totalsByCurrency | 固定分组次序；折叠不改 rows 或统计 |
-| SubscriptionDetailQuery | subscriptionID、yearSelection(currentYear/year/all)、today | 缺省 UI 传 currentYear，today 由共享 Clock 校验，不继承主轴年份 |
-| SubscriptionDetail | version、subscription、derived、resolvedYear?、availableYears、periodRows、paymentRows、matchedPeriodCount、allPeriodCount、matchedPaymentCount、allTimePaymentCount、selectedYearSpending、allTimeSpending | 同一快照，resolvedYear=nil 表示全部，此时两种支出汇总一致、UI 标签为全部年份；计数区分无记录与零元记录 |
+| SubscriptionDetailQuery | subscriptionID、today | today 由共享 Clock 校验，不继承主轴年份 |
+| SubscriptionDetail | version、subscription、derived、periodRows、paymentRows、periodCount、paymentCount、allTimeSpending | 同一快照全量返回历史；计数区分无记录与零元记录 |
 | PeriodRow | PeriodDTO + ordinal、crossesYear、linkedPaymentCount | ordinal 在全量周期中先计算，非主键；关联付款数为全部年份 |
 | SubscriptionDraft | name、symbolName、iconChoice、category、managementState、billingKind、periodStart?、expiry?、cycleMonths?、amountText、currency、note、reminderEnabled | 金额为空不代表 0；终生字段组合强约束 |
 | IconChoice | existing(assetID) / staged(token) / none | staged 需来自当前 IconService；none 表示移除图片，保留后备符号 |
@@ -538,7 +517,7 @@ protocol IconService: Sendable {
 
 | 类型 | 字段 / 行为 |
 | --- | --- |
-| PaymentListQuery | subscription(id,yearSelection) / linkedToPeriod(id)；后者明确读取该周期全部年份付款 |
+| PaymentListQuery | subscription(id) / linkedToPeriod(id)；两者均读取全部相关付款 |
 | PaymentListSnapshot | version、subscriptionID、subscriptionRevision、queryScope、PaymentDTO 数组 |
 | PaymentValues | paymentDate、Money、periodStart?、periodEnd?、note；适用第 4.3 节校验 |
 | AddPayment | subscriptionID、periodRecordID?、expectedSubscriptionRevision、PaymentValues；强制 kind=manual，关联周期须属同一订阅 |
@@ -590,7 +569,7 @@ protocol TemplateService: Sendable {
 
 从内置模板复制和从订阅提取模板都只生成 ServiceTemplateDraft，确认 save 才持久化。图片 token 失效时保留其他输入并要求重新选择；没有图片不阻止使用符号完成创建。模板的保存/删除和订阅一样使用回执、版本冲突及维护锁。
 
-### 6.6 周期历史与应用当前设置接口
+### 6.6 周期历史接口
 
 ```swift
 protocol PeriodService: Sendable {
@@ -598,8 +577,6 @@ protocol PeriodService: Sendable {
     func save(planID: UUID, context: MutationContext) async throws -> MutationResult
     func previewDeletion(periodID: UUID) async throws -> PeriodDeletionPlan
     func delete(planID: UUID, context: MutationContext) async throws -> MutationResult
-    func previewApplication(_ request: ApplyPeriod) async throws -> PeriodApplicationPlan
-    func apply(planID: UUID, context: MutationContext) async throws -> MutationResult
 }
 ```
 
@@ -609,16 +586,12 @@ protocol PeriodService: Sendable {
 | SavePeriod | subscriptionID、periodID?、expectedSubscriptionRevision、expectedPeriodRevision?、values、newPayment?；nil periodID 表示新增 manual，编辑保留 source |
 | PeriodSavePlan | planID、version、目标 ID/版本、规范化 values、关联付款草稿、重叠/相同区间提示、影响摘要；无错误可提交，有提示需用户确认 |
 | PeriodDeletionPlan | planID、version、periodID、subscriptionID、linkedPaymentCount、currentValuesUnchanged=true；删除只 nullify 付款关联 |
-| ApplyPeriod | periodID、expectedPeriodRevision、subscriptionID、expectedSubscriptionRevision、cycleMonthsForCustom?、useQuotedPrice=false、restoreActive=false、reminderOverride? |
-| PeriodApplicationPlan | planID、version、before/after 当前字段、通知影响摘要；源记录与父 ID 必须一致，未知报价不能 useQuotedPrice |
 
 PeriodSavePlan 由服务持有，绑定快照；服务提交重新验证后原子写周期、可选付款、父 revision、metadata 和回执。`newPayment` 用 PaymentValues、kind=manual，覆盖日期初始复制周期起止，用户可确认修改；更改已有周期不会改变既有付款。若对已有周期“同时登记付款”，预览必须列明这是新增付款而非纠正旧付款。
 
 所有 plan 提交先用 operationID 查回执，再核对 plan 版本；计划内容摘要固定且服务保留到本次确认结束。重放已完成的相同 plan 返回原周期/付款 ID，不因旧 storeRevision 再建记录。恢复或清空后旧 datasetID 仍应首先拒绝。
 
 删除周期在一事务中解除每笔关联付款的 periodRecord，递增这些付款 revision 以拦截持有旧关联的编辑，保留它们的金额/日期快照；删周期、版本、回执同存。父订阅 revision 加一而当前日期不变。删整个订阅则同时 cascade 删除周期与付款。
-
-apply 只更新当前订阅，preview 显示类型转换、当前日期、价格/币种是否采用、active 是否恢复和提醒变动；所有默认值必须明示，不能隐式覆盖价格或恢复状态。失败及过期 plan 沿用 validation/stalePlan/revisionConflict；不允许旧年份请求写入已切换的数据集。
 
 年份纯规则接口：`PeriodRules.matchesYear(period,selection,today)`、`PeriodRules.availableYears(periods,payments,today)`、`PeriodRules.assignOrdinals(allPeriods)`；前者按闭区间相交，lifetime 的历史区间使用记录中可编辑的结束日，新建默认 `2099-12-31`。UI 年份是查询参数，不写进这些记录。
 
@@ -632,7 +605,7 @@ apply 只更新当前订阅，preview 显示类型转换、当前日期、价格
 | Models/Subscription、Models/Payment、Models/LocalDate、Models/Money | 领域 DTO 和纯规则输入输出 |
 | Services/Subscriptions、Services/Payments、Services/Icons | 业务服务与图片适配 |
 | Views/Overview、Views/SubscriptionEditor、Views/Payments | 表格、详情、表单、历史 |
-| Views/SubscriptionDetail、Stores/SubscriptionDetailStore、Views/Periods、Services/Periods | 共用详情、年份栏、手动周期、应用当前的预览与事务 |
+| Views/SubscriptionDetail、Stores/SubscriptionDetailStore、Views/Periods、Services/Periods | 共用详情、全量历史、手动周期维护事务 |
 | Views/ServiceCatalog、Services/Templates、Resources/BuiltinServiceCatalog.json | 模板库、预填与用户模板维护；离线目录校验 |
 | Stores/OverviewStore、Services/AppServices | 页面异步状态和依赖装配 |
 
@@ -643,7 +616,7 @@ apply 只更新当前订阅，preview 显示类型转换、当前日期、价格
 1. 实现 LocalDate、Money、状态、分类及费用规则，用固定 Clock 验证边界。
 2. 建立 V1 模型、设置单例、元数据、StoreActor、回执和快照事件；验证重启持久化及失败回滚。
 3. 接入三个导航占位、WindowSession 与命令，再实现 Tab1 查询、快捷视图、分组、列配置、排序、底栏。
-4. 实现含周期/终生的表单、initial 周期与可选首次付款；完成模板预填后，接入续费的周期/付款原子事务、共用详情、按年历史与手动周期维护。
+4. 实现含周期/终生的表单、initial 周期与可选首次付款；完成模板预填后，接入续费的周期/付款原子事务、共用详情、全量历史与手动周期维护。
 5. 加入停用、复制、预览删除、跨窗口冲突；与 Tab2 提醒、Tab3 数据交换连通。
 6. 检查键盘、VoiceOver、深浅色、减少透明度、缩放和测试数据隔离。
 
@@ -661,7 +634,7 @@ apply 只更新当前订阅，preview 显示类型转换、当前日期、价格
 | 原子性与重试 | 在写周期或付款后、save 前失败，订阅/周期/付款全回滚；同请求仅一周期一付款 | RENEW-03、AC-09 |
 | 付款历史 | 调价、换币不改历史；纠正/删除付款不回退周期；零元实付是合法记录 | AC-10 |
 | 无隐式付款 | 普通新建、复制后付款数不增加，详情显示尚无付款记录 | AC-11 |
-| 筛选排序 | 五维且关系、无日期降序仍最后、币种内金额排序且终生 nil 置后、Tab 切换保留条件 | AC-12 |
+| 筛选排序 | 五维且关系、无日期降序仍最后、币种内按当前周期/一次性价格排序、Tab 切换保留条件 | AC-12 |
 | 删除与共享图标 | 预览付款计数准确，级联删除；另有订阅引用的图标不删；失败回滚 | AC-20 |
 | 多窗口竞争 | A 保存后 B 旧 revision 被拒绝，恢复后旧 datasetID 不能写入 | NAV-01、NAV-03 |
 | 原生体验 | Cmd+N/F/,、键盘表单、VoiceOver、960×640、系统外观与对比度 | AC-21 |
@@ -673,10 +646,9 @@ apply 只更新当前订阅，preview 显示类型转换、当前日期、价格
 | 共享模板图片 | 删除最后订阅但模板仍引用时文件保留；删除最后引用后才清理；恢复可读 | AC-28 |
 | 详情入口 | 名称/双击/Return、日期锚点、卡片共用详情；多选及返回位置正常 | AC-30 |
 | 手动周期 | 任意合法起止、未知报价与零元区分、可选付款；历史写入不改当前日期 | AC-31 |
-| 默认当年 | 当年空不切旧年、关闭再开回当年、固定年跨元旦不变；跨年不复制或重编号 | AC-32 |
-| 年份口径 | 2025-12-15～2026-01-14 在两年可见，2025 付款只计 2025；顶部当前资料不变 | AC-33 |
-| 应用当前 | 单独确认、custom 必选 M、保留价格/状态默认；取消无变化，成功更新提醒 | AC-34 |
-| 删除/关联 | 删周期 nullify 不删付款或退当前日期，旧付款编辑版本冲突；续费幂等三表一致 | AC-35 |
-| 历史边界 | 复制不造周期；数据包恢复已有关系；删除预览周期数准确 | AC-36 |
+| 全量历史 | 不提供年份筛选；空历史仍可添加；跨年记录不复制或重编号 | AC-32 |
+| 跨年口径 | 2025-12-15～2026-01-14 只显示一次完整区间；付款保留真实日期 | AC-33 |
+| 删除/关联 | 删周期 nullify 不删付款或退当前日期，旧付款编辑版本冲突；续费幂等三表一致 | AC-34 |
+| 历史边界 | 复制不造周期；数据包恢复已有关系；删除预览周期数准确 | AC-35 |
 
 日期、金额、事务和并发测试使用独立容器；界面用正式构建但独立测试数据集。最终须在 macOS 26 环境验证，不能把现有骨架在 macOS 27 上通过的测试当作这些业务功能已验收。

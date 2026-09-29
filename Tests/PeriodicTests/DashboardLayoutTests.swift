@@ -23,4 +23,26 @@ struct DashboardLayoutTests {
             #expect(metrics.columnWidth.isFinite)
         }
     }
+
+    @Test func unevenItemsFlowIntoTheCurrentlyShortestColumn() {
+        let layout = IndependentColumnLayout(minimumColumnWidth: 220, spacing: 12)
+
+        let assignments = layout.columnAssignments(
+            itemHeights: [100, 70, 50, 40, 30, 20],
+            columnCount: 3
+        )
+
+        #expect(assignments == [0, 1, 2, 2, 1, 0])
+    }
+
+    @Test func equalHeightColumnsPreferStableLeadingOrder() {
+        let layout = IndependentColumnLayout(minimumColumnWidth: 220, spacing: 12)
+
+        let assignments = layout.columnAssignments(
+            itemHeights: [40, 40, 40, 40],
+            columnCount: 3
+        )
+
+        #expect(assignments == [0, 1, 2, 0])
+    }
 }

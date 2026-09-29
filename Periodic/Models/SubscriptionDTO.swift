@@ -15,6 +15,8 @@ struct SubscriptionDTO: Identifiable, Hashable, Sendable {
     let money: Money
     let note: String
     let reminderEnabled: Bool
+    let reminderAdvanceDays: [Int]
+    let reminderMinuteOfDay: Int
     let automaticallyRenews: Bool
     let revision: Int64
     let createdAt: Date
@@ -35,6 +37,8 @@ struct SubscriptionDTO: Identifiable, Hashable, Sendable {
         money: Money,
         note: String,
         reminderEnabled: Bool,
+        reminderAdvanceDays: [Int] = SubscriptionNotificationSchedule.defaultAdvanceDays,
+        reminderMinuteOfDay: Int = SubscriptionNotificationSchedule.defaultMinuteOfDay,
         automaticallyRenews: Bool = false,
         revision: Int64,
         createdAt: Date,
@@ -54,6 +58,12 @@ struct SubscriptionDTO: Identifiable, Hashable, Sendable {
         self.money = money
         self.note = note
         self.reminderEnabled = reminderEnabled
+        self.reminderAdvanceDays = SubscriptionNotificationSchedule.normalizedAdvanceDays(
+            reminderAdvanceDays
+        )
+        self.reminderMinuteOfDay = SubscriptionNotificationSchedule.normalizedMinuteOfDay(
+            reminderMinuteOfDay
+        )
         self.automaticallyRenews = automaticallyRenews
         self.revision = revision
         self.createdAt = createdAt
@@ -173,6 +183,8 @@ struct SubscriptionCreateInput: Sendable {
     let money: Money
     let note: String
     let reminderEnabled: Bool
+    let reminderAdvanceDays: [Int]
+    let reminderMinuteOfDay: Int
     let automaticallyRenews: Bool
 
     init(
@@ -190,6 +202,8 @@ struct SubscriptionCreateInput: Sendable {
         money: Money,
         note: String,
         reminderEnabled: Bool,
+        reminderAdvanceDays: [Int] = SubscriptionNotificationSchedule.defaultAdvanceDays,
+        reminderMinuteOfDay: Int = SubscriptionNotificationSchedule.defaultMinuteOfDay,
         automaticallyRenews: Bool = false
     ) {
         self.id = id
@@ -206,6 +220,12 @@ struct SubscriptionCreateInput: Sendable {
         self.money = money
         self.note = note
         self.reminderEnabled = reminderEnabled
+        self.reminderAdvanceDays = SubscriptionNotificationSchedule.normalizedAdvanceDays(
+            reminderAdvanceDays
+        )
+        self.reminderMinuteOfDay = SubscriptionNotificationSchedule.normalizedMinuteOfDay(
+            reminderMinuteOfDay
+        )
         self.automaticallyRenews = automaticallyRenews
             && managementState == .active
             && billingKind == .recurring

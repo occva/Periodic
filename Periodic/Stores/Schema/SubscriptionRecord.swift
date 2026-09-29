@@ -19,6 +19,8 @@ final class SubscriptionRecord {
     var currencyScale: Int
     var note: String
     var reminderEnabled: Bool
+    var reminderAdvanceDaysRaw: String = "1"
+    var reminderMinuteOfDay: Int = 540
     var automaticallyRenews: Bool = false
     var revision: Int64
     var createdAt: Date
@@ -41,6 +43,10 @@ final class SubscriptionRecord {
         currencyScale = input.money.currency.scale
         note = input.note
         reminderEnabled = input.reminderEnabled
+        reminderAdvanceDaysRaw = SubscriptionNotificationSchedule.storedAdvanceDays(
+            input.reminderAdvanceDays
+        )
+        reminderMinuteOfDay = input.reminderMinuteOfDay
         automaticallyRenews = input.automaticallyRenews
         revision = 1
         createdAt = now
@@ -63,6 +69,10 @@ final class SubscriptionRecord {
         currencyScale = input.money.currency.scale
         note = input.note
         reminderEnabled = input.reminderEnabled
+        reminderAdvanceDaysRaw = SubscriptionNotificationSchedule.storedAdvanceDays(
+            input.reminderAdvanceDays
+        )
+        reminderMinuteOfDay = input.reminderMinuteOfDay
         automaticallyRenews = input.automaticallyRenews
         revision += 1
         updatedAt = now
@@ -93,6 +103,15 @@ final class SubscriptionRecord {
 
     func applyNonRenewal(now: Date = Date()) {
         automaticallyRenews = false
+        revision += 1
+        updatedAt = now
+    }
+
+    func setManagementState(_ state: ManagementState, now: Date = Date()) {
+        managementStateRaw = state.rawValue
+        if state == .inactive {
+            automaticallyRenews = false
+        }
         revision += 1
         updatedAt = now
     }

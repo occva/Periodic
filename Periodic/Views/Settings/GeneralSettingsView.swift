@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct GeneralSettingsView: View {
@@ -13,6 +14,8 @@ struct GeneralSettingsView: View {
     @AppStorage(PreferenceKey.menuBarShowsForecasts) private var menuBarShowsForecasts = true
     @AppStorage(PreferenceKey.defaultTimelineRange) private var defaultTimelineRange =
         TimelinePreferences.defaultRange.rawValue
+    @State private var isUpdatingNotifications = false
+    @State private var error: PresentedError?
 
     var body: some View {
         Form {
@@ -89,8 +92,8 @@ struct GeneralSettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Section("订阅提醒") {
-                LabeledContent("通知状态") {
+            Section("系统通知") {
+                LabeledContent("权限与状态") {
                     Label(notificationStatusTitle, systemImage: notificationStatusSymbol)
                         .foregroundStyle(notificationStatusColor)
                 }
@@ -98,6 +101,16 @@ struct GeneralSettingsView: View {
                 Text(notificationStatusDetail)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                HStack {
+                    if services.subscriptionNotifications.status == .authorizationRequired {
+                        Button("允许通知") { requestNotificationAuthorization() }
+                            .disabled(isUpdatingNotifications)
+                    }
+                    Button("重新安排") { reconcileNotifications() }
+                        .disabled(isUpdatingNotifications)
+                    Button("打开系统通知设置") { openSystemNotificationSettings() }
+                }
             }
         }
         .formStyle(.grouped)
@@ -107,11 +120,16 @@ struct GeneralSettingsView: View {
                 defaultTimelineRange
             )
         }
+        .onChange(of: language) {
+            reconcileNotifications()
+        }
+        .errorAlert($error)
     }
 
     private var notificationStatusTitle: String {
         switch services.subscriptionNotifications.status {
         case .idle: AppLocalization.string("尚未检查")
+        case .authorizationRequired: AppLocalization.string("尚未请求权限")
         case let .ready(scheduledCount, deferredCount, failedCount):
             if deferredCount > 0 || failedCount > 0 {
                 AppLocalization.string("部分待重试")
@@ -126,7 +144,7 @@ struct GeneralSettingsView: View {
 
     private var notificationStatusSymbol: String {
         switch services.subscriptionNotifications.status {
-        case .idle, .noReminders: "bell"
+        case .idle, .authorizationRequired, .noReminders: "bell"
         case .ready: "bell.badge"
         case .denied: "bell.slash"
         case .failed: "exclamationmark.triangle"
@@ -135,7 +153,7 @@ struct GeneralSettingsView: View {
 
     private var notificationStatusColor: Color {
         switch services.subscriptionNotifications.status {
-        case .denied, .failed: .orange
+        case .authorizationRequired, .denied, .failed: .orange
         default: .secondary
         }
     }
@@ -144,6 +162,8 @@ struct GeneralSettingsView: View {
         switch services.subscriptionNotifications.status {
         case .idle:
             return AppLocalization.string("打开主窗口后会检查订阅提醒。")
+        case .authorizationRequired:
+            return AppLocalization.string("订阅提醒已保存；允许系统通知后才会安排发送。")
         case let .ready(scheduledCount, deferredCount, failedCount):
             if deferredCount > 0 || failedCount > 0 {
                 return String(
@@ -167,5 +187,36 @@ struct GeneralSettingsView: View {
         case .failed:
             return AppLocalization.string("无法更新订阅提醒。请稍后重新打开主窗口再试。")
         }
+    }
+
+    private func reconcileNotifications() {
+        isUpdatingNotifications = true
+        Task { @MainActor in
+            defer { isUpdatingNotifications = false }
+            do {
+                try await services.reconcileSubscriptionNotifications()
+            } catch {
+                self.error = PresentedError(error, title: "无法更新订阅提醒")
+            }
+        }
+    }
+
+    private func requestNotificationAuthorization() {
+        isUpdatingNotifications = true
+        Task { @MainActor in
+            defer { isUpdatingNotifications = false }
+            do {
+                try await services.requestSubscriptionNotificationAuthorization()
+            } catch {
+                self.error = PresentedError(error, title: "无法请求通知权限")
+            }
+        }
+    }
+
+    private func openSystemNotificationSettings() {
+        guard let url = URL(
+            string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension"
+        ) else { return }
+        NSWorkspace.shared.open(url)
     }
 }

@@ -20,6 +20,10 @@ actor DataExchangeService {
         )
     }
 
+    func referencedIconReferences() async throws -> Set<String> {
+        try await store.referencedIconReferences()
+    }
+
     func prepareExport() async throws -> EncodedDataPackage {
         var snapshot = try await store.snapshot()
         snapshot.settings = settingsSnapshot()

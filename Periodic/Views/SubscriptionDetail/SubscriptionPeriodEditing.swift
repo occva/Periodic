@@ -159,4 +159,12 @@ struct SubscriptionPeriodRow: Identifiable {
         return BillingCycle(rawValue: period.cycleMonths ?? 0)?.title
             ?? AppLocalization.string("自定义")
     }
+
+    var startTitle: String {
+        guard let period else { return "—" }
+        let isCrossYear = period.end.map { $0.year != period.start.year } ?? false
+        return isCrossYear
+            ? "\(period.start.displayText) · \(AppLocalization.string("跨年"))"
+            : period.start.displayText
+    }
 }

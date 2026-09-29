@@ -16,6 +16,7 @@ enum DevelopmentSubscriptionDataset {
         ]
         let cycles = BillingCycle.allCases
         let currencies = CurrencyPreferences.developmentSampleCurrencies
+        let reminderSampleIndexes: Set<Int> = [14, 15, 16, 18, 20, 21, 23, 24, 25]
 
         return (0..<max(0, count)).map { index in
             let template = templates.isEmpty ? nil : templates[index % templates.count]
@@ -51,8 +52,11 @@ enum DevelopmentSubscriptionDataset {
                 expiry: expiry,
                 cycleMonths: isLifetime ? nil : cycle.rawValue,
                 money: Money(minorUnits: amount, currency: currency),
-                note: "多时间点测试数据 #\(index + 1)",
-                reminderEnabled: !isLifetime,
+                note: "规模测试数据 #\(index + 1)",
+                reminderEnabled: !isLifetime
+                    && !isUndated
+                    && !isInactive
+                    && reminderSampleIndexes.contains(index),
                 automaticallyRenews: automaticallyRenews
             )
         }
