@@ -1,7 +1,7 @@
 import Foundation
 
 struct Money: Hashable, Codable, Sendable {
-    enum ValidationError: LocalizedError {
+    enum ValidationError: LocalizedError, Equatable {
         case empty
         case invalid
         case negative
@@ -25,7 +25,9 @@ struct Money: Hashable, Codable, Sendable {
     static func parse(_ text: String, currency: CurrencyCode) throws -> Money {
         let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else { throw ValidationError.empty }
-        guard let decimal = Decimal(string: value, locale: Locale(identifier: "en_US_POSIX")) else {
+        let decimalPattern = #"\A[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?\z"#
+        guard value.range(of: decimalPattern, options: .regularExpression) != nil,
+              let decimal = Decimal(string: value, locale: Locale(identifier: "en_US_POSIX")) else {
             throw ValidationError.invalid
         }
         guard decimal >= 0 else { throw ValidationError.negative }

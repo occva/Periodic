@@ -5,8 +5,8 @@ actor PaymentAttachmentStore {
     private static let storedImageExtensions = ["png", "jpg", "image"]
 
     struct ImportedImageWrite: Sendable {
-        let reference: String
-        fileprivate let leaseID: UUID
+        var reference: String { lease.reference }
+        fileprivate let lease: ImageWriteLeases.Lease
     }
 
     enum StoreError: LocalizedError {
@@ -29,7 +29,7 @@ actor PaymentAttachmentStore {
 
     private let fileManager: FileManager
     private let storageRoot: URL?
-    private var activeLeaseIDsByReference: [String: Set<UUID>] = [:]
+    private var imageWriteLeases = ImageWriteLeases()
 
     init(
         fileManager: FileManager = .default,
@@ -107,7 +107,7 @@ actor PaymentAttachmentStore {
         _ writes: [ImportedImageWrite],
         keeping references: Set<String> = []
     ) {
-        let releasedReferences = releaseLeases(for: writes)
+        let releasedReferences = imageWriteLeases.release(writes.map(\.lease))
         removeReleasedImages(references: releasedReferences, keeping: references)
     }
 
@@ -115,17 +115,7 @@ actor PaymentAttachmentStore {
     /// Committed files are never deleted here because database visibility and
     /// view dismissal can occur in different tasks.
     func releaseImportedImages(_ writes: [ImportedImageWrite]) {
-        _ = releaseLeases(for: writes)
-    }
-
-    private func releaseLeases(for writes: [ImportedImageWrite]) -> Set<String> {
-        for write in writes {
-            activeLeaseIDsByReference[write.reference]?.remove(write.leaseID)
-            if activeLeaseIDsByReference[write.reference]?.isEmpty == true {
-                activeLeaseIDsByReference.removeValue(forKey: write.reference)
-            }
-        }
-        return Set(writes.map(\.reference))
+        imageWriteLeases.retain(writes.map(\.lease))
     }
 
     private func removeReleasedImages(
@@ -133,7 +123,7 @@ actor PaymentAttachmentStore {
         keeping references: Set<String>
     ) {
         for reference in releasedReferences
-        where !references.contains(reference) && activeLeaseIDsByReference[reference] == nil {
+        where !references.contains(reference) && !imageWriteLeases.hasActiveLease(for: reference) {
             do {
                 let key = try cacheKey(from: reference)
                 try removeStoredImage(key: key)
@@ -148,7 +138,7 @@ actor PaymentAttachmentStore {
     func removeStoredImages(references: Set<String>) -> Set<String> {
         var failedReferences = Set<String>()
         for reference in references {
-            guard activeLeaseIDsByReference[reference] == nil else {
+            guard !imageWriteLeases.hasActiveLease(for: reference) else {
                 failedReferences.insert(reference)
                 continue
             }
@@ -195,7 +185,7 @@ actor PaymentAttachmentStore {
             let key = url.deletingPathExtension().lastPathComponent
             guard key.count == 64, key.allSatisfy(\.isHexDigit) else { return nil }
             return PaymentAttachmentReference.make(contentHash: key)
-        }).subtracting(references).subtracting(activeLeaseIDsByReference.keys)
+        }).subtracting(references).filter { !imageWriteLeases.hasActiveLease(for: $0) }
         return removeStoredImages(references: orphanedReferences)
     }
 
@@ -215,12 +205,7 @@ actor PaymentAttachmentStore {
             try fileManager.moveItem(at: existingURL, to: destination)
         }
         let reference = PaymentAttachmentReference.make(contentHash: key)
-        let leaseID = UUID()
-        activeLeaseIDsByReference[reference, default: []].insert(leaseID)
-        return ImportedImageWrite(
-            reference: reference,
-            leaseID: leaseID
-        )
+        return ImportedImageWrite(lease: imageWriteLeases.acquire(for: reference))
     }
 
     private func validate(_ data: Data) throws -> ImageAssetFormat {
@@ -300,6 +285,7 @@ actor PaymentAttachmentStore {
             try fileManager.removeItem(at: candidate)
         }
         try? fileManager.removeItem(at: quickLookPreviewDirectory(key: key))
+        imageWriteLeases.forget(PaymentAttachmentReference.make(contentHash: key))
     }
 
     private func makeQuickLookPreviewURL(source: URL, key: String) throws -> URL {

@@ -55,6 +55,64 @@ struct AppleIconCacheTests {
         #expect(storedData == pngData)
     }
 
+    @Test func localSelectionProtectsImageFromConcurrentImportRollback() async throws {
+        let storageRoot = FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: storageRoot, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: storageRoot) }
+        let imageData = try #require(Data(base64Encoded: Self.onePixelPNG))
+        let sourceURL = storageRoot.appending(path: "icon.png")
+        try imageData.write(to: sourceURL)
+        let cache = AppleIconCache(storageRoot: storageRoot)
+        let importWrite = try await cache.persistImportedImage(imageData)
+        let editorReference = try await cache.persistLocalImage(from: sourceURL)
+
+        await cache.discardImportedImages([importWrite])
+
+        #expect(importWrite.reference == editorReference)
+        #expect(try await cache.data(for: editorReference) == imageData)
+    }
+
+    @Test func concurrentImportsKeepSharedImageUntilLastOwnerDiscards() async throws {
+        let storageRoot = FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        defer { try? FileManager.default.removeItem(at: storageRoot) }
+        let cache = AppleIconCache(storageRoot: storageRoot)
+        let imageData = try #require(Data(base64Encoded: Self.onePixelPNG))
+        let first = try await cache.persistImportedImage(imageData)
+        let second = try await cache.persistImportedImage(imageData)
+
+        await cache.discardImportedImages([first])
+        #expect(try await cache.data(for: second.reference) == imageData)
+        await cache.discardImportedImages([second])
+        await #expect(throws: AppleIconCache.CacheError.self) {
+            try await cache.data(for: second.reference)
+        }
+    }
+
+    @Test func committedIconSurvivesOlderRollbackAndRemainsExplicitlyRemovable() async throws {
+        let storageRoot = FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        defer { try? FileManager.default.removeItem(at: storageRoot) }
+        let cache = AppleIconCache(storageRoot: storageRoot)
+        let imageData = try #require(Data(base64Encoded: Self.onePixelPNG))
+        let pendingImport = try await cache.persistImportedImage(imageData)
+        let committedImport = try await cache.persistImportedImage(imageData)
+
+        await cache.releaseImportedImages([committedImport])
+        await cache.discardImportedImages([pendingImport])
+
+        #expect(try await cache.data(for: committedImport.reference) == imageData)
+        #expect(await cache.removeStoredImages(references: [committedImport.reference]).isEmpty)
+        let replacement = try await cache.persistImportedImage(imageData)
+        await cache.discardImportedImages([pendingImport])
+        #expect(try await cache.data(for: replacement.reference) == imageData)
+        await cache.discardImportedImages([replacement])
+        await #expect(throws: AppleIconCache.CacheError.self) {
+            try await cache.data(for: replacement.reference)
+        }
+    }
+
     @Test func storedImageRemovalReportsFailuresForRetry() async throws {
         let fileManager = FileManager.default
         let testDirectory = fileManager.temporaryDirectory
@@ -70,4 +128,7 @@ struct AppleIconCacheTests {
 
         #expect(failures == [reference])
     }
+
+    private static let onePixelPNG =
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
 }

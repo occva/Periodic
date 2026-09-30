@@ -460,6 +460,156 @@ struct DataExchangeTests {
         #expect(try await subscriptionStore.fetchAll().count == 1)
     }
 
+    @MainActor
+    @Test func importedHistoryAdvancesExistingOwnerRevisionOnlyWhenChanged() async throws {
+        let container = try makeContainer()
+        let subscriptionStore = SubscriptionStore(modelContainer: container)
+        let exchangeStore = DataExchangeStore(modelContainer: container)
+        let input = makeSubscriptionInput()
+        _ = try await subscriptionStore.create(input)
+        let original = try await subscriptionStore.fetchDetail(for: input.id)
+        var imported = try await exchangeStore.snapshot()
+        let extraPeriod = DataPackagePeriod(
+            recordVersion: 1,
+            id: UUID(),
+            subscriptionID: input.id,
+            billingKind: .recurring,
+            cycleMonths: 1,
+            start: LocalDate(dayNumber: 20_030),
+            end: LocalDate(dayNumber: 20_059),
+            amountMinor: 1_999,
+            currency: .usd,
+            currencyScale: 2,
+            source: .manual,
+            createdAt: Date()
+        )
+        imported.periods.append(extraPeriod)
+        _ = try await exchangeStore.execute(
+            imported: imported,
+            expectedDigest: try await exchangeStore.digest(),
+            conflictResolution: .useImported
+        )
+        let afterPeriodImport = try await subscriptionStore.fetchDetail(for: input.id)
+        #expect(afterPeriodImport.periods.count == original.periods.count + 1)
+        #expect(afterPeriodImport.subscription.revision == original.subscription.revision + 1)
+
+        let payment = DataPackagePayment(
+            recordVersion: 1,
+            id: UUID(),
+            subscriptionID: input.id,
+            periodRecordID: extraPeriod.id,
+            kind: .manual,
+            paymentDate: .today,
+            amountMinor: 999,
+            currency: .usd,
+            currencyScale: 2,
+            periodStart: extraPeriod.start,
+            periodEnd: extraPeriod.end,
+            note: "Imported payment",
+            attachmentAssetIDs: [],
+            revision: 1,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        imported.payments.append(payment)
+        _ = try await exchangeStore.execute(
+            imported: imported,
+            expectedDigest: try await exchangeStore.digest(),
+            conflictResolution: .useImported
+        )
+        let afterPaymentImport = try await subscriptionStore.fetchDetail(for: input.id)
+        #expect(afterPaymentImport.payments.count == 1)
+        #expect(afterPaymentImport.subscription.revision == afterPeriodImport.subscription.revision + 1)
+
+        let repeated = try await exchangeStore.execute(
+            imported: imported,
+            expectedDigest: try await exchangeStore.digest(),
+            conflictResolution: .useImported
+        )
+        #expect(repeated.added == 0)
+        #expect(repeated.updated == 0)
+        #expect(try await subscriptionStore.fetchDetail(for: input.id)
+            .subscription.revision == afterPaymentImport.subscription.revision)
+
+        imported.payments = [DataPackagePayment(
+            recordVersion: payment.recordVersion,
+            id: payment.id,
+            subscriptionID: payment.subscriptionID,
+            periodRecordID: payment.periodRecordID,
+            kind: payment.kind,
+            paymentDate: payment.paymentDate,
+            amountMinor: 799,
+            currency: payment.currency,
+            currencyScale: payment.currencyScale,
+            periodStart: payment.periodStart,
+            periodEnd: payment.periodEnd,
+            note: payment.note,
+            attachmentAssetIDs: [],
+            revision: payment.revision,
+            createdAt: payment.createdAt,
+            updatedAt: payment.updatedAt
+        )]
+        _ = try await exchangeStore.execute(
+            imported: imported,
+            expectedDigest: try await exchangeStore.digest(),
+            conflictResolution: .keepLocal
+        )
+        #expect(try await subscriptionStore.fetchDetail(for: input.id)
+            .subscription.revision == afterPaymentImport.subscription.revision)
+        _ = try await exchangeStore.execute(
+            imported: imported,
+            expectedDigest: try await exchangeStore.digest(),
+            conflictResolution: .useImported
+        )
+        let afterPaymentUpdate = try await subscriptionStore.fetchDetail(for: input.id)
+        #expect(afterPaymentUpdate.payments.first?.money.minorUnits == 799)
+        #expect(afterPaymentUpdate.subscription.revision == afterPaymentImport.subscription.revision + 1)
+    }
+
+    @MainActor
+    @Test func importingCurrentFieldsAndHistoryAdvancesOwnerRevisionOnce() async throws {
+        let sourceContainer = try makeContainer()
+        let targetContainer = try makeContainer()
+        let sourceStore = SubscriptionStore(modelContainer: sourceContainer)
+        let targetStore = SubscriptionStore(modelContainer: targetContainer)
+        let input = makeSubscriptionInput()
+        _ = try await sourceStore.create(input)
+        let exchangeStore = DataExchangeStore(modelContainer: targetContainer)
+        let original = try await DataExchangeStore(modelContainer: sourceContainer).snapshot()
+        _ = try await exchangeStore.execute(
+            imported: original,
+            expectedDigest: try await exchangeStore.digest(),
+            conflictResolution: .keepLocal
+        )
+        try await sourceStore.setManagementState(
+            .inactive,
+            for: [SubscriptionMutationTarget(id: input.id, expectedRevision: 1)]
+        )
+        try await sourceStore.addPeriod(SubscriptionPeriodAddInput(
+            period: SubscriptionPeriodCreateInput(
+                id: UUID(),
+                subscriptionID: input.id,
+                billingKind: .recurring,
+                cycleMonths: 1,
+                start: LocalDate(dayNumber: 20_030),
+                end: LocalDate(dayNumber: 20_059),
+                money: input.money,
+                source: .manual
+            ),
+            expectedSubscriptionRevision: 2
+        ))
+        let imported = try await DataExchangeStore(modelContainer: sourceContainer).snapshot()
+        _ = try await exchangeStore.execute(
+            imported: imported,
+            expectedDigest: try await exchangeStore.digest(),
+            conflictResolution: .useImported
+        )
+        let detail = try await targetStore.fetchDetail(for: input.id)
+        #expect(detail.subscription.managementState == .inactive)
+        #expect(detail.subscription.revision == 2)
+        #expect(detail.periods.count == 2)
+    }
+
     @Test func packageRejectsUnreferencedAssetsAndInvalidSettings() throws {
         let imageData = try #require(Data(base64Encoded: Self.onePixelPNG))
         let identifier = DataPackageCodec.sha256(imageData)

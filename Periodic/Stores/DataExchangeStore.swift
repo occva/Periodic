@@ -209,6 +209,8 @@ actor DataExchangeStore {
             var added = 0
             var updated = 0
             var skipped = 0
+            var updatedSubscriptionIDs = Set<UUID>()
+            var changedHistorySubscriptionIDs = Set<UUID>()
 
             let categories = try modelContext.fetch(FetchDescriptor<TemplateCategoryRecord>())
             let categoriesByID = Dictionary(uniqueKeysWithValues: categories.map { ($0.id, $0) })
@@ -236,6 +238,7 @@ actor DataExchangeStore {
                         skipped += 1
                     } else if conflictResolution == .useImported {
                         apply(incoming, to: record)
+                        updatedSubscriptionIDs.insert(record.id)
                         updated += 1
                     } else {
                         skipped += 1
@@ -258,13 +261,16 @@ actor DataExchangeStore {
                     if localPeriodsByID[incoming.id] == incoming {
                         skipped += 1
                     } else if conflictResolution == .useImported {
+                        changedHistorySubscriptionIDs.insert(record.subscriptionID)
                         apply(incoming, to: record)
+                        changedHistorySubscriptionIDs.insert(incoming.subscriptionID)
                         updated += 1
                     } else {
                         skipped += 1
                     }
                 } else {
                     modelContext.insert(makePeriod(incoming))
+                    changedHistorySubscriptionIDs.insert(incoming.subscriptionID)
                     added += 1
                 }
             }
@@ -296,12 +302,14 @@ actor DataExchangeStore {
                     if localPaymentsByID[incoming.id] == incoming {
                         skipped += 1
                     } else if conflictResolution == .useImported {
+                        changedHistorySubscriptionIDs.insert(record.subscriptionID)
                         apply(incoming, to: record)
                         try replacePaymentAttachments(
                             incoming.attachmentAssetIDs,
                             paymentID: incoming.id,
                             existing: paymentAttachmentsByPaymentID[incoming.id] ?? []
                         )
+                        changedHistorySubscriptionIDs.insert(incoming.subscriptionID)
                         updated += 1
                     } else {
                         skipped += 1
@@ -313,6 +321,7 @@ actor DataExchangeStore {
                         paymentID: incoming.id,
                         existing: []
                     )
+                    changedHistorySubscriptionIDs.insert(incoming.subscriptionID)
                     added += 1
                 }
             }
@@ -364,6 +373,11 @@ actor DataExchangeStore {
                 }
             }
 
+            for subscription in subscriptions where
+                changedHistorySubscriptionIDs.contains(subscription.id)
+                    && !updatedSubscriptionIDs.contains(subscription.id) {
+                subscription.markHistoryChanged()
+            }
             try modelContext.save()
             return DataImportReceipt(added: added, updated: updated, skipped: skipped)
         } catch {

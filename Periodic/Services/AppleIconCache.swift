@@ -3,9 +3,9 @@ import Foundation
 
 actor AppleIconCache {
     struct ImportedImageWrite: Sendable {
-        let reference: String
+        var reference: String { lease.reference }
         fileprivate let key: String
-        fileprivate let didCreateFile: Bool
+        fileprivate let lease: ImageWriteLeases.Lease
     }
 
     enum CacheError: LocalizedError {
@@ -35,6 +35,8 @@ actor AppleIconCache {
     private let session: URLSession
     private let fileManager: FileManager
     private let storageRoot: URL?
+    private var imageWriteLeases = ImageWriteLeases()
+    private var createdImportedReferences = Set<String>()
 
     init(
         session: URLSession = .shared,
@@ -103,7 +105,10 @@ actor AppleIconCache {
         if !fileManager.fileExists(atPath: destination.path) {
             try data.write(to: destination, options: .atomic)
         }
-        return Self.localReferencePrefix + key
+        let reference = Self.localReferencePrefix + key
+        imageWriteLeases.retain(reference: reference)
+        createdImportedReferences.remove(reference)
+        return reference
     }
 
     func persistImportedImage(_ data: Data) throws -> ImportedImageWrite {
@@ -119,10 +124,13 @@ actor AppleIconCache {
         if didCreateFile {
             try data.write(to: destination, options: .atomic)
         }
+        let reference = Self.localReferencePrefix + key
+        if didCreateFile {
+            createdImportedReferences.insert(reference)
+        }
         return ImportedImageWrite(
-            reference: Self.localReferencePrefix + key,
             key: key,
-            didCreateFile: didCreateFile
+            lease: imageWriteLeases.acquire(for: reference)
         )
     }
 
@@ -130,7 +138,10 @@ actor AppleIconCache {
         _ writes: [ImportedImageWrite],
         keeping references: Set<String> = []
     ) {
-        for write in writes where write.didCreateFile && !references.contains(write.reference) {
+        let releasedReferences = imageWriteLeases.release(writes.map(\.lease))
+        for write in writes where releasedReferences.contains(write.reference)
+            && createdImportedReferences.contains(write.reference)
+            && !references.contains(write.reference) {
             let url: URL
             do {
                 url = try storedLocalIconDirectory()
@@ -138,16 +149,28 @@ actor AppleIconCache {
                     .appendingPathExtension("image")
                 try fileManager.removeItem(at: url)
             } catch {
-                if (error as NSError).code != NSFileNoSuchFileError {
+                guard (error as NSError).code == NSFileNoSuchFileError else {
                     AppLog.persistence.error("Failed to remove an unreferenced imported icon")
+                    continue
                 }
             }
+            createdImportedReferences.remove(write.reference)
+            imageWriteLeases.forget(write.reference)
         }
+    }
+
+    func releaseImportedImages(_ writes: [ImportedImageWrite]) {
+        imageWriteLeases.retain(writes.map(\.lease))
+        createdImportedReferences.subtract(writes.map(\.reference))
     }
 
     func removeStoredImages(references: Set<String>) -> Set<String> {
         var failedReferences = Set<String>()
         for reference in references {
+            guard !imageWriteLeases.hasActiveLease(for: reference) else {
+                failedReferences.insert(reference)
+                continue
+            }
             let key: String
             if reference.hasPrefix(Self.referencePrefix) {
                 key = String(reference.dropFirst(Self.referencePrefix.count))
@@ -165,11 +188,14 @@ actor AppleIconCache {
                     at: directory.appending(path: key).appendingPathExtension("image")
                 )
             } catch {
-                if (error as NSError).code != NSFileNoSuchFileError {
+                guard (error as NSError).code == NSFileNoSuchFileError else {
                     failedReferences.insert(reference)
                     AppLog.persistence.error("Failed to remove an unreferenced subscription icon")
+                    continue
                 }
             }
+            createdImportedReferences.remove(reference)
+            imageWriteLeases.forget(reference)
         }
         return failedReferences
     }

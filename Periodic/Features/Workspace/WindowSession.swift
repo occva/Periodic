@@ -290,13 +290,15 @@ final class WindowSession {
         case .all:
             true
         case .effective:
-            analytics.status(of: item) == .effectiveRecurring
+            item.billingKindValue == .recurring
+                && item.expiry.map { $0 >= referenceDate } == true
         case .expired:
-            analytics.status(of: item) == .expired
+            item.billingKindValue == .recurring
+                && item.expiry.map { $0 < referenceDate } == true
         case .unknownDate:
-            analytics.status(of: item) == .unknownDate
+            item.billingKindValue == .recurring && item.expiry == nil
         case .lifetime:
-            analytics.status(of: item) == .effectiveLifetime
+            item.billingKindValue == .lifetime
         }
     }
 

@@ -185,11 +185,7 @@ actor DataExchangeService {
                 paymentAssetReferences[identifier] = write.reference
             }
         } catch {
-            await iconCache.discardImportedImages(iconWrites)
-            await paymentAttachmentStore.discardImportedImages(
-                paymentWrites,
-                keeping: previousPaymentAttachmentReferences
-            )
+            await discardUncommittedImages(iconWrites: iconWrites, paymentWrites: paymentWrites)
             throw error
         }
 
@@ -220,17 +216,19 @@ actor DataExchangeService {
                 conflictResolution: conflictResolution
             )
         } catch {
-            await iconCache.discardImportedImages(iconWrites)
-            await paymentAttachmentStore.discardImportedImages(
-                paymentWrites,
-                keeping: previousPaymentAttachmentReferences
-            )
+            await discardUncommittedImages(iconWrites: iconWrites, paymentWrites: paymentWrites)
             throw error
         }
 
         do {
             let referencedImages = try await store.referencedIconReferences()
-            await iconCache.discardImportedImages(iconWrites, keeping: referencedImages)
+            await iconCache.releaseImportedImages(
+                iconWrites.filter { referencedImages.contains($0.reference) }
+            )
+            await iconCache.discardImportedImages(
+                iconWrites.filter { !referencedImages.contains($0.reference) },
+                keeping: referencedImages
+            )
             let referencedPaymentAttachments = try await store
                 .referencedPaymentAttachmentReferences()
             await paymentAttachmentStore.releaseImportedImages(paymentWrites)
@@ -242,6 +240,7 @@ actor DataExchangeService {
         } catch {
             // The database transaction has committed. Retain the files rather
             // than deleting assets that may now be referenced by imported rows.
+            await iconCache.releaseImportedImages(iconWrites)
             await paymentAttachmentStore.releaseImportedImages(paymentWrites)
             AppLog.persistence.error("Failed to remove unreferenced imported icons")
         }
@@ -249,6 +248,22 @@ actor DataExchangeService {
             apply(settings)
         }
         return receipt
+    }
+
+    private func discardUncommittedImages(
+        iconWrites: [AppleIconCache.ImportedImageWrite],
+        paymentWrites: [PaymentAttachmentStore.ImportedImageWrite]
+    ) async {
+        do {
+            let iconReferences = try await store.referencedIconReferences()
+            let paymentReferences = try await store.referencedPaymentAttachmentReferences()
+            await iconCache.discardImportedImages(iconWrites, keeping: iconReferences)
+            await paymentAttachmentStore.discardImportedImages(paymentWrites, keeping: paymentReferences)
+        } catch {
+            await iconCache.releaseImportedImages(iconWrites)
+            await paymentAttachmentStore.releaseImportedImages(paymentWrites)
+            AppLog.persistence.error("Failed to verify references for imported image cleanup")
+        }
     }
 
     private func settingsSnapshot() -> DataPackageSettings {

@@ -83,6 +83,30 @@ struct PaymentAttachmentStoreTests {
         }
     }
 
+    @Test func committedImageSurvivesConcurrentImportRollbackWithStaleReferences() async throws {
+        let storageRoot = FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        defer { try? FileManager.default.removeItem(at: storageRoot) }
+        let store = PaymentAttachmentStore(storageRoot: storageRoot)
+        let imageData = try #require(Data(base64Encoded: Self.onePixelPNG))
+        let importWrite = try await store.persistImportedImage(imageData)
+        let editorWrite = try await store.persistImportedImage(imageData)
+
+        await store.releaseImportedImages([editorWrite])
+        await store.discardImportedImages([importWrite], keeping: [])
+
+        #expect(try await store.data(for: editorWrite.reference) == imageData)
+        #expect(await store.removeStoredImages(references: [editorWrite.reference]).isEmpty)
+        await #expect(throws: PaymentAttachmentStore.StoreError.self) {
+            try await store.data(for: editorWrite.reference)
+        }
+        let replacement = try await store.persistImportedImage(imageData)
+        await store.discardImportedImages([replacement])
+        await #expect(throws: PaymentAttachmentStore.StoreError.self) {
+            try await store.data(for: replacement.reference)
+        }
+    }
+
     @Test func committedImageSurvivesStoreRecreationAndStartupGracePeriod() async throws {
         let storageRoot = FileManager.default.temporaryDirectory
             .appending(path: UUID().uuidString, directoryHint: .isDirectory)
