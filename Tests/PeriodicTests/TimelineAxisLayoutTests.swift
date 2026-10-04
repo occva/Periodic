@@ -30,4 +30,112 @@ struct TimelineAxisLayoutTests {
         )
         #expect(layout.dayOffset(forHorizontalScroll: 20, viewportWidth: 0) == 0)
     }
+
+    @Test func timelineSortSupportsTimeCostMetadataAndStatusFields() throws {
+        let referenceDate = try LocalDate(iso8601Text: "2026-10-04")
+        let expired = makeItem(
+            name: "Expired",
+            category: .tools,
+            state: .active,
+            periodStart: try LocalDate(iso8601Text: "2026-09-01"),
+            expiry: try LocalDate(iso8601Text: "2026-09-30"),
+            cycleMonths: 1,
+            amountMinor: 700,
+            note: ""
+        )
+        let future = makeItem(
+            name: "Future",
+            category: .media,
+            state: .active,
+            periodStart: try LocalDate(iso8601Text: "2025-10-10"),
+            expiry: try LocalDate(iso8601Text: "2026-10-10"),
+            cycleMonths: 12,
+            amountMinor: 12_000,
+            note: "B"
+        )
+        let inactive = makeItem(
+            name: "Inactive",
+            category: .household,
+            state: .inactive,
+            periodStart: try LocalDate(iso8601Text: "2026-09-01"),
+            expiry: try LocalDate(iso8601Text: "2026-12-01"),
+            cycleMonths: 3,
+            amountMinor: 300,
+            note: "A"
+        )
+        let items = [inactive, future, expired]
+
+        #expect(
+            TimelineSortField.expiryStatus.sorted(
+                items,
+                direction: .ascending,
+                referenceDate: referenceDate
+            ).map(\.name) == ["Future", "Expired", "Inactive"]
+        )
+        #expect(
+            TimelineSortField.remainingDays.sorted(
+                items,
+                direction: .ascending,
+                referenceDate: referenceDate
+            ).map(\.name) == ["Expired", "Future", "Inactive"]
+        )
+        #expect(
+            TimelineSortField.monthlyEstimate.sorted(
+                items,
+                direction: .ascending,
+                referenceDate: referenceDate
+            ).map(\.name) == ["Inactive", "Expired", "Future"]
+        )
+        #expect(
+            TimelineSortField.note.sorted(
+                items,
+                direction: .ascending,
+                referenceDate: referenceDate
+            ).map(\.name) == ["Inactive", "Future", "Expired"]
+        )
+        #expect(
+            TimelineSortField.name.sorted(
+                items,
+                direction: .descending,
+                referenceDate: referenceDate
+            ).map(\.name) == ["Inactive", "Future", "Expired"]
+        )
+    }
+
+    @Test func timelinePreferencesRejectUnknownStoredSortValues() {
+        #expect(TimelinePreferences.sortField(for: "unknown") == .expiry)
+        #expect(TimelinePreferences.sortDirection(for: "unknown") == .ascending)
+        #expect(TimelinePreferences.defaultUpcomingExpanded)
+    }
+
+    private func makeItem(
+        name: String,
+        category: ServiceCategory,
+        state: ManagementState,
+        periodStart: LocalDate,
+        expiry: LocalDate,
+        cycleMonths: Int,
+        amountMinor: Int64,
+        note: String
+    ) -> SubscriptionListItem {
+        SubscriptionListItem(dto: SubscriptionDTO(
+            id: UUID(),
+            name: name,
+            symbolName: "calendar",
+            iconResourceName: nil,
+            iconURLString: nil,
+            category: category,
+            managementState: state,
+            billingKind: .recurring,
+            periodStart: periodStart,
+            expiry: expiry,
+            cycleMonths: cycleMonths,
+            money: Money(minorUnits: amountMinor, currency: .cny),
+            note: note,
+            reminderEnabled: false,
+            revision: 1,
+            createdAt: Date(),
+            updatedAt: Date()
+        ))
+    }
 }

@@ -2,23 +2,29 @@ import SwiftUI
 
 struct TimelineView: View {
     @Bindable var session: WindowSession
+    @AppStorage(PreferenceKey.timelineSortField) private var timelineSortFieldRaw =
+        TimelinePreferences.defaultSortField.rawValue
+    @AppStorage(PreferenceKey.timelineSortDirection) private var timelineSortDirectionRaw =
+        TimelinePreferences.defaultSortDirection.rawValue
+    @AppStorage(PreferenceKey.timelineUpcomingExpanded) private var isUpcomingExpanded =
+        TimelinePreferences.defaultUpcomingExpanded
+
     @State private var centerDate = Date()
     @State private var pendingHorizontalDayOffset = 0.0
-    @State private var isUpcomingExpanded = true
     @State private var specialCollection: TimelineSpecialCollection?
 
     var body: some View {
         VStack(spacing: 0) {
             TimelineGridView(
-                items: session.datedItems,
+                items: sortedDatedItems,
                 centerDate: centerDate,
                 range: session.timelineRange,
+                referenceDate: session.referenceDate,
                 onEdit: session.presentEditor(for:),
                 onDetails: session.presentDetails(for:),
                 onCenter: { centerTimeline(on: $0.date()) },
                 onHorizontalScroll: panTimeline
             )
-            Divider()
             upcomingSection
         }
         .toolbar { toolbarContent }
@@ -37,94 +43,114 @@ struct TimelineView: View {
     }
 
     private var upcomingSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 8) {
-                    upcomingTitle
-                    Spacer(minLength: 12)
-                    if isUpcomingExpanded { horizonPicker }
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 12) {
+                Button {
+                    withAnimation(.snappy) {
+                        isUpcomingExpanded.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        Label("即将到期", systemImage: "clock.badge.exclamationmark")
+                            .font(.headline)
+                        Text(session.upcomingItems.count, format: .number)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 2)
+                            .background(.quaternary, in: Capsule())
+                        Image(systemName: isUpcomingExpanded ? "chevron.down" : "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .contentShape(Rectangle())
                 }
-                VStack(alignment: .leading, spacing: 10) {
-                    upcomingTitle
-                    if isUpcomingExpanded { horizonPicker }
+                .buttonStyle(.plain)
+                .accessibilityLabel(AppLocalization.string(
+                    isUpcomingExpanded ? "收起即将到期" : "展开即将到期"
+                ))
+
+                Spacer(minLength: 12)
+
+                if isUpcomingExpanded {
+                    horizonPicker
                 }
             }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 12)
 
-            if !isUpcomingExpanded {
-                EmptyView()
-            } else if session.upcomingItems.isEmpty {
-                ContentUnavailableView(
-                    "当前条件下无临期订阅",
-                    systemImage: "checkmark.circle",
-                    description: Text("未来 \(session.dueHorizon.rawValue) 天内的项目会显示在这里。")
-                )
-                .frame(maxWidth: .infinity, minHeight: 104)
-            } else {
-                ScrollView(.horizontal) {
-                    GlassEffectContainer(spacing: 10) {
-                        HStack(spacing: 10) {
-                            ForEach(session.upcomingItems) { item in
-                                VStack(alignment: .leading, spacing: 6) {
-                                    HStack(spacing: 8) {
-                                        Button {
-                                            session.presentDetails(for: item.id)
-                                        } label: {
-                                            ServiceIconView(
-                                                iconResourceName: item.iconResourceName,
-                                                iconURLString: item.iconURLString,
-                                                fallbackSeed: item.name,
-                                                size: 24
-                                            )
+            if isUpcomingExpanded {
+                Divider()
+                Group {
+                    if session.upcomingItems.isEmpty {
+                        ContentUnavailableView(
+                            "当前条件下无临期订阅",
+                            systemImage: "checkmark.circle",
+                            description: Text("未来 \(session.dueHorizon.rawValue) 天内的项目会显示在这里。")
+                        )
+                        .frame(maxWidth: .infinity, minHeight: 112)
+                    } else {
+                        ScrollView(.horizontal) {
+                            GlassEffectContainer(spacing: 10) {
+                                HStack(spacing: 10) {
+                                    ForEach(session.upcomingItems) { item in
+                                        VStack(alignment: .leading, spacing: 8) {
+                                            HStack(spacing: 9) {
+                                                Button {
+                                                    session.presentDetails(for: item.id)
+                                                } label: {
+                                                    ServiceIconView(
+                                                        iconResourceName: item.iconResourceName,
+                                                        iconURLString: item.iconURLString,
+                                                        fallbackSeed: item.name,
+                                                        size: 28
+                                                    )
+                                                }
+                                                .buttonStyle(.plain)
+                                                .help("查看订阅详情")
+                                                .accessibilityLabel("查看 \(item.name) 的订阅详情")
+
+                                                Text(item.name)
+                                                    .font(.headline)
+                                                    .lineLimit(1)
+                                                Spacer(minLength: 0)
+                                            }
+                                            HStack(spacing: 6) {
+                                                Text(item.expiryDate)
+                                                Text(item.expiryStatus(relativeTo: session.referenceDate))
+                                                    .fontWeight(.medium)
+                                                    .foregroundStyle(.primary)
+                                            }
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                            .monospacedDigit()
                                         }
-                                        .buttonStyle(.plain)
-                                        .help("查看订阅详情")
-                                        .accessibilityLabel("查看 \(item.name) 的订阅详情")
-                                        Text(item.name).font(.headline)
-                                    }
-                                    Text(item.expiryDate)
-                                        .foregroundStyle(.secondary)
-                                    Text(item.expiryStatus)
-                                        .font(.caption.weight(.medium))
-                                }
-                                .frame(width: 190, alignment: .leading)
-                                .padding(12)
-                                .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 12))
-                                .contentShape(.rect(cornerRadius: 12))
-                                .onTapGesture(count: 2) {
-                                    session.presentDetails(for: item.id)
-                                }
-                                .contextMenu {
-                                    Button("订阅详情") {
-                                        session.presentDetails(for: item.id)
-                                    }
-                                    Button("编辑订阅") {
-                                        session.presentEditor(for: item.id)
+                                        .frame(width: 210, alignment: .leading)
+                                        .padding(12)
+                                        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 14))
+                                        .contentShape(.rect(cornerRadius: 14))
+                                        .onTapGesture(count: 2) {
+                                            session.presentDetails(for: item.id)
+                                        }
+                                        .contextMenu {
+                                            Button("订阅详情") {
+                                                session.presentDetails(for: item.id)
+                                            }
+                                            Button("编辑订阅") {
+                                                session.presentEditor(for: item.id)
+                                            }
+                                        }
                                     }
                                 }
                             }
+                            .padding(10)
                         }
+                        .scrollIndicators(.hidden)
                     }
-                    .padding(8)
-                }
-                .scrollIndicators(.hidden)
-            }
-        }
-        .padding(16)
-    }
-
-    private var upcomingTitle: some View {
-        HStack(spacing: 8) {
-            Label("即将到期", systemImage: "clock.badge.exclamationmark")
-                .font(.headline)
-                .fixedSize()
-            Button(isUpcomingExpanded ? "收起" : "展开", systemImage: isUpcomingExpanded ? "chevron.down" : "chevron.right") {
-                withAnimation(.snappy) {
-                    isUpcomingExpanded.toggle()
                 }
             }
-            .labelStyle(.iconOnly)
-            .buttonStyle(.plain)
         }
+        .overlay(alignment: .top) { Divider() }
     }
 
     private var horizonPicker: some View {
@@ -189,6 +215,8 @@ struct TimelineView: View {
         }
 
         ToolbarItemGroup(placement: .primaryAction) {
+            sortMenu
+
             Menu {
                 Picker("服务类型", selection: $session.timelineCategory) {
                     Text("全部服务类型").tag(nil as ServiceCategory?)
@@ -233,6 +261,79 @@ struct TimelineView: View {
                 prompt: "搜索订阅名称"
             )
         }
+    }
+
+    private var sortMenu: some View {
+        Menu {
+            Section("时间") {
+                sortFieldButton(.expiry)
+                sortFieldButton(.remainingDays)
+                sortFieldButton(.periodStart)
+            }
+            Section("费用") {
+                sortFieldButton(.amount)
+                sortFieldButton(.monthlyEstimate)
+                sortFieldButton(.annualEstimate)
+            }
+            Section("资料") {
+                sortFieldButton(.name)
+                sortFieldButton(.category)
+                sortFieldButton(.billingCycle)
+                sortFieldButton(.note)
+            }
+            Section("状态") {
+                sortFieldButton(.expiryStatus)
+                sortFieldButton(.managementState)
+            }
+            Divider()
+            Picker("排序方向", selection: sortDirectionBinding) {
+                ForEach(TimelineSortDirection.allCases) { direction in
+                    Label(direction.title, systemImage: direction.symbolName)
+                        .tag(direction)
+                }
+            }
+        } label: {
+            Label("排序", systemImage: "arrow.up.arrow.down.circle")
+        }
+        .help(String(
+            format: AppLocalization.string("排序：%@ · %@"),
+            timelineSortField.title,
+            timelineSortDirection.title
+        ))
+    }
+
+    private func sortFieldButton(_ field: TimelineSortField) -> some View {
+        Button {
+            timelineSortFieldRaw = field.rawValue
+        } label: {
+            Label(
+                field.title,
+                systemImage: field == timelineSortField ? "checkmark" : field.symbolName
+            )
+        }
+    }
+
+    private var sortedDatedItems: [SubscriptionListItem] {
+        timelineSortField.sorted(
+            session.datedItems,
+            direction: timelineSortDirection,
+            referenceDate: session.referenceDate
+        )
+    }
+
+    private var timelineSortField: TimelineSortField {
+        TimelinePreferences.sortField(for: timelineSortFieldRaw)
+    }
+
+    private var timelineSortDirection: TimelineSortDirection {
+        TimelinePreferences.sortDirection(for: timelineSortDirectionRaw)
+    }
+
+    private var sortDirectionBinding: Binding<TimelineSortDirection> {
+        Binding(
+            get: { timelineSortDirection },
+            set: { timelineSortDirectionRaw = $0.rawValue }
+        )
     }
 
     private func shiftRange(by direction: Int) {

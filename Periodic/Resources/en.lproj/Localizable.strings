@@ -204,6 +204,16 @@
 "清除筛选" = "Clear Filters";
 "筛选" = "Filter";
 "没有到期项目" = "No Expiration Dates";
+"时间" = "Time";
+"费用" = "Cost";
+"资料" = "Details";
+"排序方向" = "Sort Direction";
+"升序" = "Ascending";
+"降序" = "Descending";
+"订阅时间" = "Start Date";
+"收起即将到期" = "Collapse Upcoming";
+"展开即将到期" = "Expand Upcoming";
+"排序：%@ · %@" = "Sort: %1$@ · %2$@";
 
 "快捷视图" = "Quick View";
 "清除条件" = "Clear";

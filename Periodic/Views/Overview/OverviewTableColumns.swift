@@ -74,7 +74,7 @@ enum OverviewTextColumn: String, CaseIterable, Identifiable {
         case .managementStatus, .billingKind: 68
         case .category, .expiryStatus: 85
         case .expiryDate: 100
-        case .remainingDays: 108
+        case .remainingDays: 144
         case .amount: 108
         case .monthlyEstimate, .annualEstimate: 102
         case .note: 116
@@ -86,7 +86,7 @@ enum OverviewTextColumn: String, CaseIterable, Identifiable {
         case .managementStatus, .billingKind: 80
         case .category, .expiryStatus: 88
         case .expiryDate: 96
-        case .remainingDays: 120
+        case .remainingDays: 160
         case .amount: 120
         case .monthlyEstimate, .annualEstimate: 112
         case .note: 150
@@ -98,7 +98,7 @@ enum OverviewTextColumn: String, CaseIterable, Identifiable {
         case .managementStatus, .billingKind: 86
         case .category, .expiryStatus: 100
         case .expiryDate: 106
-        case .remainingDays: 132
+        case .remainingDays: 184
         case .amount: 140
         case .monthlyEstimate, .annualEstimate: 126
         case .note: 180
@@ -113,13 +113,13 @@ private struct RemainingDurationCell: View {
     var body: some View {
         HStack(spacing: 6) {
             Text(item.remainingDayCount(relativeTo: referenceDate).map(String.init) ?? "—")
-                .frame(minWidth: 28, alignment: .trailing)
+                .frame(minWidth: 42, alignment: .trailing)
                 .monospacedDigit()
             if let progress = item.remainingDaysProgress(relativeTo: referenceDate) {
                 ProgressView(value: progress)
                     .progressViewStyle(.linear)
                     .tint(progress > 0 ? .green : .secondary)
-                    .frame(width: 72)
+                    .frame(width: 88)
                     .help("按 100 天刻度显示剩余时间")
             }
         }

@@ -65,9 +65,14 @@ struct SubscriptionDomainTests {
     @Test func builtinCatalogContainsOnlyTemplatesWithBundledIcons() throws {
         let catalog = try BuiltinTemplateCatalog.load()
 
-        #expect(catalog.version == "2.3.0")
-        #expect(catalog.templates.count == 125)
+        #expect(catalog.version == "2.4.0")
+        #expect(catalog.templates.count == 138)
         #expect(catalog.templates.allSatisfy { $0.iconResourceName != nil })
+        #expect(Set(catalog.templates.map(\.key)).count == catalog.templates.count)
+        #expect(
+            Set(catalog.templates.compactMap(\.iconResourceName)).count
+                == catalog.templates.count
+        )
         #expect(!catalog.templates.contains { $0.key == .builtin("builtin.apple-icloud") })
 
         let categoriesByKey = Dictionary(
@@ -79,6 +84,18 @@ struct SubscriptionDomainTests {
         #expect(categoriesByKey[.builtin("builtin.patreon")] == .media)
         #expect(categoriesByKey[.builtin("builtin.claude")] == .tools)
         #expect(categoriesByKey[.builtin("builtin.gemini")] == .tools)
+        #expect(categoriesByKey[.builtin("builtin.glm-coding-plan")] == .tools)
+        #expect(categoriesByKey[.builtin("builtin.netease-cloud-music")] == .media)
+        #expect(categoriesByKey[.builtin("builtin.giffgaff")] == .communication)
+        #expect(categoriesByKey[.builtin("builtin.pinduoduo")] == .household)
+        #expect(categoriesByKey[.builtin("builtin.weread")] == .workStudy)
+        #expect(categoriesByKey[.builtin("builtin.1688-plus")] == .household)
+
+        let lifetimeTemplate = try #require(catalog.templates.first {
+            $0.key == .builtin("builtin.bu-bei-dan-ci")
+        })
+        #expect(lifetimeTemplate.suggestedBillingKind == .lifetime)
+        #expect(lifetimeTemplate.suggestedCycleMonths == nil)
     }
 
     @Test func moneyRespectsCurrencyPrecision() throws {
