@@ -166,18 +166,10 @@ private struct TimelineRowView: View {
             let width = proxy.size.width
             let rowCenterY = proxy.size.height / 2
             let rawX = layout.x(for: item.expiry ?? .today, width: width)
-            let anchorWidth: CGFloat = 24
-            let minimumEventWidth: CGFloat = 150
-            let maximumEventWidth: CGFloat = 310
-            let rightSpace = max(anchorWidth, width - rawX + anchorWidth / 2 - 8)
-            let leftSpace = max(anchorWidth, rawX + anchorWidth / 2 - 8)
-            let direction: HorizontalEdge = rightSpace >= minimumEventWidth
-                || rightSpace >= leftSpace ? .trailing : .leading
-            let availableWidth = direction == .trailing ? rightSpace : leftSpace
-            let eventWidth = min(maximumEventWidth, max(anchorWidth, availableWidth))
-            let eventCenterX = direction == .trailing
-                ? rawX + (eventWidth - anchorWidth) / 2
-                : rawX - (eventWidth - anchorWidth) / 2
+            let placement = TimelineEventPlacement(
+                anchorX: rawX,
+                viewportWidth: width
+            )
 
             ZStack(alignment: .leading) {
                 if rawX < 0 {
@@ -189,11 +181,14 @@ private struct TimelineRowView: View {
                         item: item,
                         referenceDate: referenceDate,
                         statusColor: statusColor,
-                        direction: direction,
+                        direction: placement.direction,
                         onDetails: onDetails
                     )
-                    .frame(width: eventWidth)
-                    .position(x: eventCenterX, y: rowCenterY)
+                    .frame(
+                        width: placement.width,
+                        alignment: placement.direction == .trailing ? .leading : .trailing
+                    )
+                    .position(x: placement.centerX, y: rowCenterY)
                 }
             }
         }

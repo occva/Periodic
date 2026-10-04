@@ -1,3 +1,4 @@
+import CoreData
 import Foundation
 import SwiftData
 import Testing
@@ -197,12 +198,12 @@ struct SubscriptionMaintenanceTests {
     }
 
     @Test func appSchemaHasExplicitVersionsAndMigration() {
-        let schema = Schema(versionedSchema: AppSchemaV6.self)
+        let schema = Schema(versionedSchema: AppSchemaV9.self)
 
-        #expect(schema.version == Schema.Version(6, 0, 0))
-        #expect(schema.entities.count == AppSchemaV6.models.count)
-        #expect(AppSchemaMigrationPlan.schemas.count == 6)
-        #expect(AppSchemaMigrationPlan.stages.count == 5)
+        #expect(schema.version == Schema.Version(9, 0, 0))
+        #expect(schema.entities.count == AppSchemaV9.models.count)
+        #expect(AppSchemaMigrationPlan.schemas.count == 9)
+        #expect(AppSchemaMigrationPlan.stages.count == 8)
     }
 
     @MainActor
@@ -229,7 +230,7 @@ struct SubscriptionMaintenanceTests {
             try context.save()
         }
 
-        let versionedSchema = Schema(versionedSchema: AppSchemaV6.self)
+        let versionedSchema = Schema(versionedSchema: AppSchemaV9.self)
         let reopenedContainer = try PersistenceController(storeURL: storeURL).makeContainer(
             schema: versionedSchema,
             migrationPlan: AppSchemaMigrationPlan.self
@@ -241,6 +242,57 @@ struct SubscriptionMaintenanceTests {
         #expect(records.map(\.id) == [input.id])
         #expect(records.first?.reminderAdvanceDaysRaw == "1")
         #expect(records.first?.reminderMinuteOfDay == 9 * 60)
+    }
+
+    @MainActor
+    @Test func versionEightStoreMigratesWithoutChangingPublishedSchema() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        let storeURL = directory.appending(path: "Periodic.store")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let input = try makeInput(name: "V8 Subscription")
+        let syncRecordID = input.id.uuidString
+
+        do {
+            let container = try PersistenceController(storeURL: storeURL).makeContainer(
+                schema: Schema(versionedSchema: AppSchemaV8.self)
+            )
+            let context = ModelContext(container)
+            context.insert(SubscriptionRecord(input: input))
+            context.insert(
+                AppSchemaV8.SyncRecordStateRecord(
+                    recordType: .subscription,
+                    recordID: syncRecordID,
+                    revision: 1,
+                    modifiedAt: Date(timeIntervalSince1970: 1_700_000_000),
+                    modifiedByDeviceID: UUID(),
+                    isDeleted: false,
+                    deletedAt: nil
+                )
+            )
+            try context.save()
+        }
+
+        let metadata = try NSPersistentStoreCoordinator.metadataForPersistentStore(
+            ofType: NSSQLiteStoreType,
+            at: storeURL
+        )
+        #expect(
+            metadata["NSStoreModelVersionChecksumKey"] as? String
+                == "EWK1jZXboGvf1odtPGpEany6A+RVDlwdnHheieCbGUM="
+        )
+
+        let container = try PersistenceController(storeURL: storeURL).makeContainer(
+            schema: Schema(versionedSchema: AppSchemaV9.self),
+            migrationPlan: AppSchemaMigrationPlan.self
+        )
+        let context = ModelContext(container)
+        let subscriptions = try context.fetch(FetchDescriptor<SubscriptionRecord>())
+        let syncStates = try context.fetch(FetchDescriptor<SyncRecordStateRecord>())
+
+        #expect(subscriptions.map(\.id) == [input.id])
+        #expect(syncStates.map(\.recordID) == [syncRecordID])
+        #expect(syncStates.first?.serverRecordData == nil)
     }
 
     @MainActor
@@ -278,7 +330,7 @@ struct SubscriptionMaintenanceTests {
         }
 
         let container = try PersistenceController(storeURL: storeURL).makeContainer(
-            schema: Schema(versionedSchema: AppSchemaV6.self),
+            schema: Schema(versionedSchema: AppSchemaV9.self),
             migrationPlan: AppSchemaMigrationPlan.self
         )
         let context = ModelContext(container)
@@ -340,7 +392,7 @@ struct SubscriptionMaintenanceTests {
         }
 
         let container = try PersistenceController(storeURL: storeURL).makeContainer(
-            schema: Schema(versionedSchema: AppSchemaV6.self),
+            schema: Schema(versionedSchema: AppSchemaV9.self),
             migrationPlan: AppSchemaMigrationPlan.self
         )
         let context = ModelContext(container)

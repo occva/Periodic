@@ -305,7 +305,7 @@ struct SubscriptionSharingTests {
             try context.save()
         }
         let container = try PersistenceController(storeURL: url).makeContainer(
-            schema: Schema(versionedSchema: AppSchemaV6.self), migrationPlan: AppSchemaMigrationPlan.self
+            schema: Schema(versionedSchema: AppSchemaV9.self), migrationPlan: AppSchemaMigrationPlan.self
         )
         let detail = try await SubscriptionStore(modelContainer: container).fetchDetail(for: input.id)
         #expect(detail.subscription.money == input.money)
@@ -322,12 +322,12 @@ struct SubscriptionSharingTests {
         let input = makeInput(sharing: organizer())
         do {
             let container = try PersistenceController(storeURL: url).makeContainer(
-                schema: Schema(versionedSchema: AppSchemaV6.self), migrationPlan: AppSchemaMigrationPlan.self
+                schema: Schema(versionedSchema: AppSchemaV9.self), migrationPlan: AppSchemaMigrationPlan.self
             )
             _ = try await SubscriptionStore(modelContainer: container).create(input)
         }
         let reopened = try PersistenceController(storeURL: url).makeContainer(
-            schema: Schema(versionedSchema: AppSchemaV6.self), migrationPlan: AppSchemaMigrationPlan.self
+            schema: Schema(versionedSchema: AppSchemaV9.self), migrationPlan: AppSchemaMigrationPlan.self
         )
         let detail = try await SubscriptionStore(modelContainer: reopened).fetchDetail(for: input.id)
         #expect(detail.subscription.sharing == input.sharing)
@@ -367,7 +367,7 @@ struct SubscriptionSharingTests {
 
     @MainActor
     private func makeContainer() throws -> ModelContainer {
-        try PersistenceController().makeContainer(schema: Schema(versionedSchema: AppSchemaV6.self), inMemory: true)
+        try PersistenceController().makeContainer(schema: Schema(versionedSchema: AppSchemaV9.self), inMemory: true)
     }
 
     private func makeInput(

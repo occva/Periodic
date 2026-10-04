@@ -7,12 +7,26 @@ import SwiftData
 @Observable
 final class AppServices {
     let persistence: PersistenceController
+    let datasetDescriptor: DatasetDescriptor
+    let datasetAccess: DatasetAccessCoordinator
+    let deviceIdentity: DeviceIdentity
     let subscriptionStore: SubscriptionStore?
     let templateStore: TemplateStore?
     let templateCategoryStore: TemplateCategoryStore?
+    let syncMutationStore: SyncMutationStore?
+    let syncRecordSnapshotStore: SyncRecordSnapshotStore?
+    let syncBootstrapStore: SyncBootstrapStore?
+    let syncRemoteInboxStore: SyncRemoteInboxStore?
+    let syncRemoteChangeApplier: SyncRemoteChangeApplier?
+    let cloudSyncStatusStore: CloudSyncStatusStore?
+    let cloudSyncMetadataStore: CloudSyncMetadataStore?
+    let cloudKitSyncEngineAdapter: CloudKitSyncEngineAdapter?
+    let cloudSyncCoordinator: CloudSyncCoordinator
     let appleIconSearch: AppleIconSearchClient
     let appleIconCache: AppleIconCache
     let paymentAttachmentStore: PaymentAttachmentStore
+    let cloudImageAssetStager: CloudImageAssetStager
+    let cloudAssetRepository: CloudAssetRepository
     let exchangeRates: FrankfurterExchangeRateClient
     let subscriptionNotifications: SubscriptionNotificationService
     let dataExchange: DataExchangeService?
@@ -38,6 +52,47 @@ final class AppServices {
         let useMemoryStore = inMemory ?? processArguments.contains("-store-in-memory")
         let enablesSampleNotifications = useMemoryStore
             && processArguments.contains("-enable-test-notifications")
+        let descriptor: DatasetDescriptor
+        let descriptorRepository: DatasetDescriptorRepository?
+        let resolvedDeviceIdentity: DeviceIdentity
+        let descriptorError: (any Error)?
+        if useMemoryStore {
+            descriptor = .local()
+            descriptorRepository = nil
+            resolvedDeviceIdentity = DeviceIdentity()
+            descriptorError = nil
+        } else {
+            do {
+                let repository = DatasetDescriptorRepository(
+                    descriptorURL: AppConfiguration.datasetDescriptorURL
+                )
+                let loadedDescriptor = try repository.loadOrCreate(
+                    seedDatasetID: AppPreferenceValues.datasetID(in: defaults)
+                )
+                let loadedDeviceIdentity = try DeviceIdentityRepository(
+                    identityURL: AppConfiguration.deviceIdentityURL
+                ).loadOrCreate()
+                descriptor = loadedDescriptor
+                descriptorRepository = repository
+                resolvedDeviceIdentity = loadedDeviceIdentity
+                descriptorError = nil
+                defaults.set(
+                    loadedDescriptor.datasetID.uuidString,
+                    forKey: PreferenceKey.datasetID
+                )
+            } catch {
+                descriptor = .local(
+                    datasetID: AppPreferenceValues.datasetID(in: defaults)
+                )
+                descriptorRepository = nil
+                resolvedDeviceIdentity = DeviceIdentity()
+                descriptorError = error
+            }
+        }
+        let resolvedDatasetAccess = DatasetAccessCoordinator(
+            descriptor: descriptor,
+            deviceID: resolvedDeviceIdentity.id
+        )
         let resolvedAppleIconCache = appleIconCache ?? AppleIconCache(
             storageRoot: Self.defaultIconStorageRoot(useMemoryStore: useMemoryStore)
         )
@@ -46,12 +101,30 @@ final class AppServices {
                 useMemoryStore: useMemoryStore
             )
         )
+        let resolvedCloudAssetStagingRoot = useMemoryStore
+            ? FileManager.default.temporaryDirectory
+                .appending(path: "PeriodicTests", directoryHint: .isDirectory)
+                .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+                .appending(path: "CloudAssetStaging", directoryHint: .isDirectory)
+            : AppConfiguration.cloudAssetStagingRoot
         self.persistence = persistence
+        datasetDescriptor = descriptor
+        datasetAccess = resolvedDatasetAccess
+        deviceIdentity = resolvedDeviceIdentity
         self.defaults = defaults
         usesPersistentStore = !useMemoryStore
         appleIconSearch = AppleIconSearchClient()
         self.appleIconCache = resolvedAppleIconCache
         self.paymentAttachmentStore = resolvedPaymentAttachmentStore
+        let resolvedCloudImageAssetStager = CloudImageAssetStager(
+            stagingRoot: resolvedCloudAssetStagingRoot
+        )
+        cloudImageAssetStager = resolvedCloudImageAssetStager
+        cloudAssetRepository = CloudAssetRepository(
+            iconCache: resolvedAppleIconCache,
+            paymentAttachmentStore: resolvedPaymentAttachmentStore,
+            stager: resolvedCloudImageAssetStager
+        )
         exchangeRates = FrankfurterExchangeRateClient()
         subscriptionNotifications = SubscriptionNotificationService(
             isSystemIntegrationEnabled: !useMemoryStore || enablesSampleNotifications,
@@ -69,19 +142,102 @@ final class AppServices {
             builtinTemplateError = PresentedError(error, title: "无法读取内置模板")
         }
         do {
-            let schema = Schema(versionedSchema: AppSchemaV6.self)
+            if let descriptorError {
+                throw descriptorError
+            }
+            let schema = Schema(versionedSchema: AppSchemaV9.self)
             let container = try persistence.makeContainer(
                 schema: schema,
                 migrationPlan: AppSchemaMigrationPlan.self,
                 inMemory: useMemoryStore
             )
+            _ = try DatasetMetadata.prepare(
+                in: ModelContext(container),
+                descriptor: descriptor
+            )
             modelContainer = container
-            subscriptionStore = SubscriptionStore(modelContainer: container)
-            templateStore = TemplateStore(modelContainer: container)
-            templateCategoryStore = TemplateCategoryStore(modelContainer: container)
-            builtinTemplateCategoryStore = BuiltinTemplateCategoryStore(modelContainer: container)
+            subscriptionStore = SubscriptionStore(
+                modelContainer: container,
+                datasetAccess: resolvedDatasetAccess
+            )
+            templateStore = TemplateStore(
+                modelContainer: container,
+                datasetAccess: resolvedDatasetAccess
+            )
+            templateCategoryStore = TemplateCategoryStore(
+                modelContainer: container,
+                datasetAccess: resolvedDatasetAccess
+            )
+            let resolvedSyncMutationStore = SyncMutationStore(
+                modelContainer: container,
+                datasetAccess: resolvedDatasetAccess
+            )
+            syncMutationStore = resolvedSyncMutationStore
+            let resolvedSyncRecordSnapshotStore = SyncRecordSnapshotStore(
+                modelContainer: container,
+                datasetAccess: resolvedDatasetAccess,
+                assetRepository: cloudAssetRepository
+            )
+            syncRecordSnapshotStore = resolvedSyncRecordSnapshotStore
+            syncBootstrapStore = SyncBootstrapStore(
+                modelContainer: container,
+                datasetAccess: resolvedDatasetAccess,
+                assetRepository: cloudAssetRepository
+            )
+            let resolvedSyncRemoteInboxStore = SyncRemoteInboxStore(
+                modelContainer: container,
+                datasetAccess: resolvedDatasetAccess
+            )
+            syncRemoteInboxStore = resolvedSyncRemoteInboxStore
+            let resolvedSyncRemoteChangeApplier = SyncRemoteChangeApplier(
+                modelContainer: container,
+                datasetAccess: resolvedDatasetAccess,
+                assetRepository: cloudAssetRepository
+            )
+            syncRemoteChangeApplier = resolvedSyncRemoteChangeApplier
+            cloudSyncStatusStore = CloudSyncStatusStore(
+                modelContainer: container
+            )
+            cloudSyncMetadataStore = CloudSyncMetadataStore(
+                modelContainer: container,
+                datasetAccess: resolvedDatasetAccess
+            )
+            if let containerIdentifier =
+                AppConfiguration.iCloudContainerIdentifier {
+                cloudKitSyncEngineAdapter = CloudKitSyncEngineAdapter(
+                    containerIdentifier: containerIdentifier,
+                    zoneName: AppConfiguration.defaultCloudZoneName,
+                    stateRepository: CloudSyncEngineStateRepository(
+                        stateURL: AppConfiguration.cloudSyncStateURL(
+                            datasetID: descriptor.datasetID
+                        )
+                    ),
+                    accountIdentityRepository:
+                        CloudAccountIdentityRepository(
+                            identityURL: AppConfiguration
+                                .cloudAccountIdentityURL(
+                                    datasetID: descriptor.datasetID
+                                )
+                        ),
+                    datasetAccess: resolvedDatasetAccess,
+                    mutationStore: resolvedSyncMutationStore,
+                    snapshotStore: resolvedSyncRecordSnapshotStore,
+                    inboxStore: resolvedSyncRemoteInboxStore,
+                    remoteChangeApplier: resolvedSyncRemoteChangeApplier,
+                    assetRepository: cloudAssetRepository
+                )
+            } else {
+                cloudKitSyncEngineAdapter = nil
+            }
+            builtinTemplateCategoryStore = BuiltinTemplateCategoryStore(
+                modelContainer: container,
+                datasetAccess: resolvedDatasetAccess
+            )
             dataExchange = DataExchangeService(
-                store: DataExchangeStore(modelContainer: container),
+                store: DataExchangeStore(
+                    modelContainer: container,
+                    datasetAccess: resolvedDatasetAccess
+                ),
                 iconCache: resolvedAppleIconCache,
                 paymentAttachmentStore: resolvedPaymentAttachmentStore
             )
@@ -90,9 +246,45 @@ final class AppServices {
             subscriptionStore = nil
             templateStore = nil
             templateCategoryStore = nil
+            syncMutationStore = nil
+            syncRecordSnapshotStore = nil
+            syncBootstrapStore = nil
+            syncRemoteInboxStore = nil
+            syncRemoteChangeApplier = nil
+            cloudSyncStatusStore = nil
+            cloudSyncMetadataStore = nil
+            cloudKitSyncEngineAdapter = nil
             builtinTemplateCategoryStore = nil
             dataExchange = nil
             initializationError = PresentedError(error, title: "无法打开订阅数据")
+        }
+        let safetySnapshotRoot = useMemoryStore
+            ? FileManager.default.temporaryDirectory
+                .appending(path: "PeriodicTests", directoryHint: .isDirectory)
+                .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+                .appending(
+                    path: "iCloud Safety Snapshots",
+                    directoryHint: .isDirectory
+                )
+            : AppConfiguration.cloudSafetySnapshotRoot
+        cloudSyncCoordinator = CloudSyncCoordinator(
+            transport: cloudKitSyncEngineAdapter,
+            bootstrapStore: syncBootstrapStore,
+            statusStore: cloudSyncStatusStore,
+            remoteChangeApplier: syncRemoteChangeApplier,
+            dataExchange: dataExchange,
+            metadataStore: cloudSyncMetadataStore,
+            descriptorRepository: descriptorRepository,
+            safetySnapshotService: CloudSyncSafetySnapshotService(
+                root: safetySnapshotRoot
+            ),
+            descriptor: descriptor,
+            defaults: defaults
+        )
+        cloudSyncCoordinator.setDataChangeHandler { [weak self] in
+            guard let self else { return }
+            subscriptionDataVersion &+= 1
+            templateDataVersion &+= 1
         }
     }
 
@@ -138,10 +330,16 @@ final class AppServices {
 
     func notifySubscriptionDataChanged() {
         subscriptionDataVersion &+= 1
+        Task {
+            await cloudSyncCoordinator.localDataDidChange()
+        }
     }
 
     func notifyTemplateDataChanged() {
         templateDataVersion &+= 1
+        Task {
+            await cloudSyncCoordinator.localDataDidChange()
+        }
     }
 
     func previewSubscriptionDeletion(
@@ -354,6 +552,9 @@ final class AppServices {
         do {
             let referencedImages = try await dataExchange.referencedIconReferences()
             let orphanedReferences = pendingReferences.subtracting(referencedImages)
+            _ = try await syncBootstrapStore?.recordAssetDeletions(
+                references: orphanedReferences
+            )
             let failures = await appleIconCache.removeStoredImages(
                 references: orphanedReferences
             )
@@ -412,8 +613,14 @@ final class AppServices {
         do {
             let referenced = try await subscriptionStore
                 .referencedPaymentAttachmentReferences()
+            let orphanedReferences = pendingReferences.subtracting(
+                referenced
+            )
+            _ = try await syncBootstrapStore?.recordAssetDeletions(
+                references: orphanedReferences
+            )
             let failures = await paymentAttachmentStore.removeStoredImages(
-                references: pendingReferences.subtracting(referenced)
+                references: orphanedReferences
             )
             storePendingPaymentAttachmentCleanupReferences(failures)
         } catch {

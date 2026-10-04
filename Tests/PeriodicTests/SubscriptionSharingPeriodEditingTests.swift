@@ -471,7 +471,7 @@ struct SubscriptionSharingPeriodEditingTests {
         role: SubscriptionSharingRole = .organizer
     ) async throws -> (SubscriptionStore, SubscriptionDTO) {
         let container = try PersistenceController().makeContainer(
-            schema: Schema(versionedSchema: AppSchemaV6.self), inMemory: true
+            schema: Schema(versionedSchema: AppSchemaV9.self), inMemory: true
         )
         let store = SubscriptionStore(modelContainer: container)
         let source = try subscription(role: role)

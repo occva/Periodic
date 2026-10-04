@@ -27,6 +27,34 @@ actor DataExchangeService {
         )
     }
 
+    func previewAssets() async throws -> DataExportAssetPreview {
+        let snapshot = try await store.snapshot()
+        let iconReferences = Set(
+            snapshot.subscriptions.compactMap(\.iconAssetID)
+                + snapshot.templates.compactMap(\.iconAssetID)
+        )
+        let attachmentReferences = Set(
+            snapshot.payments.flatMap(\.attachmentAssetIDs)
+        )
+        var estimatedBytes: Int64 = 0
+        for reference in iconReferences.sorted() {
+            estimatedBytes = try addingAssetSize(
+                (try await iconCache.data(for: reference)).count,
+                to: estimatedBytes
+            )
+        }
+        for reference in attachmentReferences.sorted() {
+            estimatedBytes = try addingAssetSize(
+                (try await paymentAttachmentStore.data(for: reference)).count,
+                to: estimatedBytes
+            )
+        }
+        return DataExportAssetPreview(
+            assetCount: iconReferences.count + attachmentReferences.count,
+            estimatedBytes: estimatedBytes
+        )
+    }
+
     func referencedIconReferences() async throws -> Set<String> {
         try await store.referencedIconReferences()
     }
@@ -92,6 +120,7 @@ actor DataExchangeService {
             try await iconCache.validateImportedImage(data)
         }
         let targetDigest = try await store.digest()
+        let targetVersion = try await store.version()
         let comparisonSnapshot = try await snapshotResolvingKnownAssets(package)
         let basePreview = try await store.preview(imported: comparisonSnapshot)
         let preview = DataImportPreview(
@@ -107,6 +136,7 @@ actor DataExchangeService {
             id: UUID(),
             package: package,
             targetDigest: targetDigest,
+            targetVersion: targetVersion,
             preview: preview,
             expiresAt: Date().addingTimeInterval(15 * 60)
         )
@@ -213,6 +243,7 @@ actor DataExchangeService {
             receipt = try await store.execute(
                 imported: snapshot,
                 expectedDigest: plan.targetDigest,
+                expectedVersion: plan.targetVersion,
                 conflictResolution: conflictResolution
             )
         } catch {
@@ -248,6 +279,19 @@ actor DataExchangeService {
             apply(settings)
         }
         return receipt
+    }
+
+    private func addingAssetSize(
+        _ byteCount: Int,
+        to current: Int64
+    ) throws -> Int64 {
+        let (result, overflow) = current.addingReportingOverflow(
+            Int64(byteCount)
+        )
+        guard !overflow else {
+            throw DataExchangeError.resourceLimitExceeded
+        }
+        return result
     }
 
     private func discardUncommittedImages(

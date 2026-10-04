@@ -455,6 +455,11 @@ struct DataExportPreview: Equatable, Sendable {
     let assignments: Int
 }
 
+struct DataExportAssetPreview: Equatable, Sendable {
+    let assetCount: Int
+    let estimatedBytes: Int64
+}
+
 struct DataImportPreview: Equatable, Sendable {
     let subscriptions: EntityChanges
     let periods: EntityChanges
@@ -499,8 +504,25 @@ struct DataImportPlan: Sendable {
     let id: UUID
     let package: DecodedDataPackage
     let targetDigest: String
+    let targetVersion: DatasetVersion?
     let preview: DataImportPreview
     let expiresAt: Date
+
+    init(
+        id: UUID,
+        package: DecodedDataPackage,
+        targetDigest: String,
+        targetVersion: DatasetVersion? = nil,
+        preview: DataImportPreview,
+        expiresAt: Date
+    ) {
+        self.id = id
+        self.package = package
+        self.targetDigest = targetDigest
+        self.targetVersion = targetVersion
+        self.preview = preview
+        self.expiresAt = expiresAt
+    }
 }
 
 struct DataImportReceipt: Equatable, Sendable {

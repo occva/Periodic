@@ -29,6 +29,19 @@ actor SubscriptionStore {
         }
     }
 
+    private var datasetAccess = DatasetAccessCoordinator()
+
+    init(
+        modelContainer: ModelContainer,
+        datasetAccess: DatasetAccessCoordinator = DatasetAccessCoordinator()
+    ) {
+        self.modelContainer = modelContainer
+        modelExecutor = DefaultSerialModelExecutor(
+            modelContext: ModelContext(modelContainer)
+        )
+        self.datasetAccess = datasetAccess
+    }
+
     private var sharingPersistence: SubscriptionSharingPersistence {
         SubscriptionSharingPersistence(context: modelContext)
     }
@@ -60,10 +73,21 @@ actor SubscriptionStore {
     func create(
         _ input: SubscriptionCreateInput,
         historyPolicy: SubscriptionCreationHistoryPolicy = .recordInitialPeriod
-    ) throws -> UUID {
-        try commit {
+    ) async throws -> UUID {
+        try await commit {
             try sharingPersistence.set(input.sharing, subscriptionID: input.id, myMoney: input.money)
-            modelContext.insert(SubscriptionRecord(input: input))
+            let record = SubscriptionRecord(input: input)
+            modelContext.insert(record)
+            try SyncMutationJournal.recordCreate(
+                in: modelContext,
+                deviceID: datasetAccess.deviceID,
+                recordType: .subscription,
+                recordID: record.id.uuidString,
+                fieldValues: try SyncRecordPayload.subscription(
+                    record,
+                    sharing: input.sharing
+                )
+            )
             if historyPolicy == .recordInitialPeriod,
                let period = initialPeriod(for: input) {
                 try insertPeriod(period)
@@ -75,11 +99,22 @@ actor SubscriptionStore {
     func create(
         _ inputs: [SubscriptionCreateInput],
         additionalPeriods: [SubscriptionPeriodCreateInput] = []
-    ) throws {
-        try commit {
+    ) async throws {
+        try await commit {
             for input in inputs {
                 try sharingPersistence.set(input.sharing, subscriptionID: input.id, myMoney: input.money)
-                modelContext.insert(SubscriptionRecord(input: input))
+                let record = SubscriptionRecord(input: input)
+                modelContext.insert(record)
+                try SyncMutationJournal.recordCreate(
+                    in: modelContext,
+                    deviceID: datasetAccess.deviceID,
+                    recordType: .subscription,
+                    recordID: record.id.uuidString,
+                    fieldValues: try SyncRecordPayload.subscription(
+                        record,
+                        sharing: input.sharing
+                    )
+                )
                 if let period = initialPeriod(for: input) {
                     try insertPeriod(period)
                 }
@@ -180,9 +215,13 @@ actor SubscriptionStore {
         _ input: SubscriptionCreateInput,
         expectedRevision: Int64,
         historyPolicy: SubscriptionUpdateHistoryPolicy
-    ) throws {
-        try commit {
+    ) async throws {
+        try await commit {
             let record = try fetchSubscription(id: input.id, expectedRevision: expectedRevision)
+            let previous = try SyncRecordPayload.subscription(
+                record,
+                sharing: sharingPersistence.plan(subscriptionID: record.id)
+            )
             switch historyPolicy {
             case .currentOnly:
                 if input.billingKind == .lifetime {
@@ -199,11 +238,23 @@ actor SubscriptionStore {
             }
             try sharingPersistence.set(input.sharing, subscriptionID: input.id, myMoney: input.money)
             record.apply(input)
+            try SyncMutationJournal.recordUpdate(
+                in: modelContext,
+                deviceID: datasetAccess.deviceID,
+                recordType: .subscription,
+                recordID: record.id.uuidString,
+                previous: previous,
+                current: try SyncRecordPayload.subscription(
+                    record,
+                    sharing: input.sharing
+                ),
+                legacyBaseRevision: expectedRevision
+            )
         }
     }
 
-    func addPeriod(_ input: SubscriptionPeriodAddInput) throws {
-        try commit {
+    func addPeriod(_ input: SubscriptionPeriodAddInput) async throws {
+        try await commit {
             let subscription = try fetchSubscription(
                 id: input.period.subscriptionID,
                 expectedRevision: input.expectedSubscriptionRevision
@@ -213,8 +264,8 @@ actor SubscriptionStore {
         }
     }
 
-    func updatePeriod(_ input: SubscriptionPeriodUpdateInput) throws {
-        try commit {
+    func updatePeriod(_ input: SubscriptionPeriodUpdateInput) async throws {
+        try await commit {
             let subscription = try fetchSubscription(
                 id: input.original.subscriptionID,
                 expectedRevision: input.expectedSubscriptionRevision
@@ -227,6 +278,10 @@ actor SubscriptionStore {
             case .replace(let plan):
                 sharing = plan
             }
+            let previous = try SyncRecordPayload.period(
+                period,
+                sharing: input.original.sharing
+            )
             try sharing?.validate(myMoney: input.money)
             try sharingPersistence.set(
                 sharing,
@@ -235,12 +290,23 @@ actor SubscriptionStore {
                 myMoney: input.money
             )
             period.apply(input)
+            try SyncMutationJournal.recordUpdate(
+                in: modelContext,
+                deviceID: datasetAccess.deviceID,
+                recordType: .subscriptionPeriod,
+                recordID: period.id.uuidString,
+                previous: previous,
+                current: try SyncRecordPayload.period(
+                    period,
+                    sharing: sharing
+                )
+            )
             subscription.markHistoryChanged()
         }
     }
 
-    func deletePeriod(_ input: SubscriptionPeriodDeleteInput) throws {
-        try commit {
+    func deletePeriod(_ input: SubscriptionPeriodDeleteInput) async throws {
+        try await commit {
             let subscription = try fetchSubscription(
                 id: input.original.subscriptionID,
                 expectedRevision: input.expectedSubscriptionRevision
@@ -253,18 +319,44 @@ actor SubscriptionStore {
                 )
             )
             for payment in linkedPayments {
+                let attachmentReferences = try paymentAttachmentReferencesByPaymentID(
+                    paymentIDs: [payment.id]
+                )[payment.id] ?? []
+                let previous = SyncRecordPayload.payment(
+                    payment,
+                    attachmentReferences: attachmentReferences
+                )
+                let baseRevision = payment.revision
                 payment.periodRecordID = nil
                 payment.revision += 1
                 payment.updatedAt = .now
+                try SyncMutationJournal.recordUpdate(
+                    in: modelContext,
+                    deviceID: datasetAccess.deviceID,
+                    recordType: .subscriptionPayment,
+                    recordID: payment.id.uuidString,
+                    previous: previous,
+                    current: SyncRecordPayload.payment(
+                        payment,
+                        attachmentReferences: attachmentReferences
+                    ),
+                    legacyBaseRevision: baseRevision
+                )
             }
+            try SyncMutationJournal.recordDelete(
+                in: modelContext,
+                deviceID: datasetAccess.deviceID,
+                recordType: .subscriptionPeriod,
+                recordID: period.id.uuidString
+            )
             try sharingPersistence.set(nil, subscriptionID: period.subscriptionID, periodID: period.id, myMoney: input.original.money)
             modelContext.delete(period)
             subscription.markHistoryChanged()
         }
     }
 
-    func addPayment(_ input: SubscriptionPaymentAddInput) throws {
-        try commit {
+    func addPayment(_ input: SubscriptionPaymentAddInput) async throws {
+        try await commit {
             let subscription = try fetchSubscription(
                 id: input.payment.subscriptionID,
                 expectedRevision: input.expectedSubscriptionRevision
@@ -274,17 +366,28 @@ actor SubscriptionStore {
                 input.payment.periodRecordID,
                 subscriptionID: input.payment.subscriptionID
             )
-            modelContext.insert(SubscriptionPaymentRecord(input: input.payment))
+            let payment = SubscriptionPaymentRecord(input: input.payment)
+            modelContext.insert(payment)
             try replacePaymentAttachments(
                 paymentID: input.payment.id,
                 references: input.payment.attachmentReferences
+            )
+            try SyncMutationJournal.recordCreate(
+                in: modelContext,
+                deviceID: datasetAccess.deviceID,
+                recordType: .subscriptionPayment,
+                recordID: payment.id.uuidString,
+                fieldValues: SyncRecordPayload.payment(
+                    payment,
+                    attachmentReferences: input.payment.attachmentReferences
+                )
             )
             subscription.markHistoryChanged()
         }
     }
 
-    func updatePayment(_ input: SubscriptionPaymentUpdateInput) throws {
-        try commit {
+    func updatePayment(_ input: SubscriptionPaymentUpdateInput) async throws {
+        try await commit {
             let subscription = try fetchSubscription(
                 id: input.original.subscriptionID,
                 expectedRevision: input.expectedSubscriptionRevision
@@ -301,22 +404,46 @@ actor SubscriptionStore {
                 subscriptionID: input.original.subscriptionID
             )
             let payment = try payment(matching: input.original)
+            let previous = SyncRecordPayload.payment(
+                payment,
+                attachmentReferences: input.original.attachmentReferences
+            )
+            let baseRevision = payment.revision
             payment.apply(input)
             try replacePaymentAttachments(
                 paymentID: payment.id,
                 references: input.attachmentReferences
             )
+            try SyncMutationJournal.recordUpdate(
+                in: modelContext,
+                deviceID: datasetAccess.deviceID,
+                recordType: .subscriptionPayment,
+                recordID: payment.id.uuidString,
+                previous: previous,
+                current: SyncRecordPayload.payment(
+                    payment,
+                    attachmentReferences: input.attachmentReferences
+                ),
+                legacyBaseRevision: baseRevision
+            )
             subscription.markHistoryChanged()
         }
     }
 
-    func deletePayment(_ input: SubscriptionPaymentDeleteInput) throws {
-        try commit {
+    func deletePayment(_ input: SubscriptionPaymentDeleteInput) async throws {
+        try await commit {
             let subscription = try fetchSubscription(
                 id: input.original.subscriptionID,
                 expectedRevision: input.expectedSubscriptionRevision
             )
             let payment = try payment(matching: input.original)
+            try SyncMutationJournal.recordDelete(
+                in: modelContext,
+                deviceID: datasetAccess.deviceID,
+                recordType: .subscriptionPayment,
+                recordID: payment.id.uuidString,
+                legacyBaseRevision: payment.revision
+            )
             try paymentAttachments(paymentID: payment.id).forEach(modelContext.delete)
             try legacyPaymentAttachments(paymentID: payment.id).forEach(modelContext.delete)
             modelContext.delete(payment)
@@ -357,8 +484,10 @@ actor SubscriptionStore {
         )
     }
 
-    func delete(_ preview: SubscriptionDeletionPreview) throws -> SubscriptionDeletionResult {
-        try commit {
+    func delete(
+        _ preview: SubscriptionDeletionPreview
+    ) async throws -> SubscriptionDeletionResult {
+        try await commit {
             let records = try modelContext.fetch(FetchDescriptor<SubscriptionRecord>())
             let recordsByID = Dictionary(uniqueKeysWithValues: records.map { ($0.id, $0) })
             let targetIDs = Set(preview.targets.map(\.id))
@@ -391,6 +520,32 @@ actor SubscriptionStore {
             let candidateAttachmentReferences = Set(
                 paymentAttachments.map(\.reference)
             ).union(legacyPaymentAttachments.map(\.reference))
+            for payment in payments {
+                try SyncMutationJournal.recordDelete(
+                    in: modelContext,
+                    deviceID: datasetAccess.deviceID,
+                    recordType: .subscriptionPayment,
+                    recordID: payment.id.uuidString,
+                    legacyBaseRevision: payment.revision
+                )
+            }
+            for period in periods {
+                try SyncMutationJournal.recordDelete(
+                    in: modelContext,
+                    deviceID: datasetAccess.deviceID,
+                    recordType: .subscriptionPeriod,
+                    recordID: period.id.uuidString
+                )
+            }
+            for target in targets {
+                try SyncMutationJournal.recordDelete(
+                    in: modelContext,
+                    deviceID: datasetAccess.deviceID,
+                    recordType: .subscription,
+                    recordID: target.id.uuidString,
+                    legacyBaseRevision: target.revision
+                )
+            }
             for attachment in paymentAttachments { modelContext.delete(attachment) }
             for attachment in legacyPaymentAttachments { modelContext.delete(attachment) }
             for payment in payments { modelContext.delete(payment) }
@@ -436,8 +591,8 @@ actor SubscriptionStore {
     func setManagementState(
         _ state: ManagementState,
         for targets: [SubscriptionMutationTarget]
-    ) throws {
-        try commit {
+    ) async throws {
+        try await commit {
             let uniqueTargets = Dictionary(
                 targets.map { ($0.id, $0) },
                 uniquingKeysWith: { first, _ in first }
@@ -449,7 +604,23 @@ actor SubscriptionStore {
                 guard record.revision == target.expectedRevision else {
                     throw StoreError.revisionConflict
                 }
+                let previous = try SyncRecordPayload.subscription(
+                    record,
+                    sharing: sharingPersistence.plan(subscriptionID: record.id)
+                )
                 record.setManagementState(state)
+                try SyncMutationJournal.recordUpdate(
+                    in: modelContext,
+                    deviceID: datasetAccess.deviceID,
+                    recordType: .subscription,
+                    recordID: record.id.uuidString,
+                    previous: previous,
+                    current: try SyncRecordPayload.subscription(
+                        record,
+                        sharing: sharingPersistence.plan(subscriptionID: record.id)
+                    ),
+                    legacyBaseRevision: target.expectedRevision
+                )
             }
         }
     }
@@ -457,8 +628,8 @@ actor SubscriptionStore {
     func confirmAutomaticRenewal(
         _ request: SubscriptionRenewalRequest,
         referenceDate: LocalDate = .today
-    ) throws -> SubscriptionRenewalPreview {
-        try commit {
+    ) async throws -> SubscriptionRenewalPreview {
+        try await commit {
             let record = try fetchSubscription(
                 id: request.subscriptionID,
                 expectedRevision: request.expectedRevision
@@ -466,6 +637,10 @@ actor SubscriptionStore {
             guard record.expiryDay == request.expectedExpiry.dayNumber else {
                 throw StoreError.revisionConflict
             }
+            let previous = try SyncRecordPayload.subscription(
+                record,
+                sharing: sharingPersistence.plan(subscriptionID: record.id)
+            )
 
             let preview = try SubscriptionRenewalRule.preview(
                 subscription: makeDTO(record),
@@ -503,10 +678,33 @@ actor SubscriptionStore {
                 attachmentReferences: []
             )
             try validate(payment)
-            modelContext.insert(SubscriptionPaymentRecord(input: payment))
+            let paymentRecord = SubscriptionPaymentRecord(input: payment)
+            modelContext.insert(paymentRecord)
+            try SyncMutationJournal.recordCreate(
+                in: modelContext,
+                deviceID: datasetAccess.deviceID,
+                recordType: .subscriptionPayment,
+                recordID: paymentRecord.id.uuidString,
+                fieldValues: SyncRecordPayload.payment(
+                    paymentRecord,
+                    attachmentReferences: []
+                )
+            )
             record.applyRenewal(
                 start: preview.nextStart,
                 expiry: preview.nextExpiry
+            )
+            try SyncMutationJournal.recordUpdate(
+                in: modelContext,
+                deviceID: datasetAccess.deviceID,
+                recordType: .subscription,
+                recordID: record.id.uuidString,
+                previous: previous,
+                current: try SyncRecordPayload.subscription(
+                    record,
+                    sharing: sharingPersistence.plan(subscriptionID: record.id)
+                ),
+                legacyBaseRevision: request.expectedRevision
             )
             return preview
         }
@@ -515,8 +713,8 @@ actor SubscriptionStore {
     func markAutomaticRenewalNotRenewed(
         _ request: SubscriptionNonRenewalRequest,
         referenceDate: LocalDate = .today
-    ) throws {
-        try commit {
+    ) async throws {
+        try await commit {
             let record = try fetchSubscription(
                 id: request.subscriptionID,
                 expectedRevision: request.expectedRevision
@@ -530,13 +728,30 @@ actor SubscriptionStore {
                 referenceDate: referenceDate
             )
 
+            let previous = try SyncRecordPayload.subscription(
+                record,
+                sharing: subscription.sharing
+            )
             record.applyNonRenewal()
+            try SyncMutationJournal.recordUpdate(
+                in: modelContext,
+                deviceID: datasetAccess.deviceID,
+                recordType: .subscription,
+                recordID: record.id.uuidString,
+                previous: previous,
+                current: try SyncRecordPayload.subscription(
+                    record,
+                    sharing: subscription.sharing
+                ),
+                legacyBaseRevision: request.expectedRevision
+            )
         }
     }
 
     /// Completes the lifetime-history invariant for data created before the
     /// app began materializing a bounded lifetime period automatically.
-    func backfillLifetimePeriods() throws -> Int {
+    func backfillLifetimePeriods() async throws -> Int {
+        let lease = try await datasetAccess.acquireWrite()
         do {
             let subscriptions = try modelContext.fetch(FetchDescriptor<SubscriptionRecord>())
             let periods = try modelContext.fetch(FetchDescriptor<SubscriptionPeriodRecord>())
@@ -547,7 +762,26 @@ actor SubscriptionStore {
             var changedCount = 0
 
             for period in lifetimePeriods where period.endDay == nil {
+                let sharing = try sharingPersistence.plan(
+                    subscriptionID: period.subscriptionID,
+                    periodID: period.id
+                )
+                let previous = try SyncRecordPayload.period(
+                    period,
+                    sharing: sharing
+                )
                 period.endDay = LocalDate.defaultLifetimeHistoryEnd.dayNumber
+                try SyncMutationJournal.recordUpdate(
+                    in: modelContext,
+                    deviceID: datasetAccess.deviceID,
+                    recordType: .subscriptionPeriod,
+                    recordID: period.id.uuidString,
+                    previous: previous,
+                    current: try SyncRecordPayload.period(
+                        period,
+                        sharing: sharing
+                    )
+                )
                 changedCount += 1
             }
 
@@ -581,22 +815,37 @@ actor SubscriptionStore {
             }
 
             if changedCount > 0 {
+                try DatasetMetadata.advanceRevision(
+                    in: modelContext,
+                    descriptor: datasetAccess.descriptor
+                )
                 try modelContext.save()
             }
+            await datasetAccess.releaseWrite(lease)
             return changedCount
         } catch {
             modelContext.rollback()
+            await datasetAccess.releaseWrite(lease)
             throw error
         }
     }
 
-    private func commit<Value>(_ changes: () throws -> Value) throws -> Value {
+    private func commit<Value>(
+        _ changes: () throws -> Value
+    ) async throws -> Value {
+        let lease = try await datasetAccess.acquireWrite()
         do {
             let value = try changes()
+            try DatasetMetadata.advanceRevision(
+                in: modelContext,
+                descriptor: datasetAccess.descriptor
+            )
             try modelContext.save()
+            await datasetAccess.releaseWrite(lease)
             return value
         } catch {
             modelContext.rollback()
+            await datasetAccess.releaseWrite(lease)
             throw error
         }
     }
@@ -909,7 +1158,18 @@ actor SubscriptionStore {
             periodID: input.id,
             myMoney: input.money
         )
-        modelContext.insert(SubscriptionPeriodRecord(input: input))
+        let record = SubscriptionPeriodRecord(input: input)
+        modelContext.insert(record)
+        try SyncMutationJournal.recordCreate(
+            in: modelContext,
+            deviceID: datasetAccess.deviceID,
+            recordType: .subscriptionPeriod,
+            recordID: record.id.uuidString,
+            fieldValues: try SyncRecordPayload.period(
+                record,
+                sharing: input.sharing
+            )
+        )
     }
 
     private func initialPeriod(

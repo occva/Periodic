@@ -8,7 +8,7 @@ enum ImageAssetValidationError: Error {
     case imageTooLarge
 }
 
-enum ImageAssetFormat {
+enum ImageAssetFormat: String, Hashable, Sendable {
     case png
     case jpeg
 

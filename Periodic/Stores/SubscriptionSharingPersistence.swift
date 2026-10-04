@@ -71,6 +71,16 @@ struct SubscriptionSharingPersistence {
             .forEach(context.delete)
     }
 
+    func remove(subscriptionID: UUID, periodID: UUID? = nil) throws {
+        let key = SubscriptionSharingRecord.key(
+            subscriptionID: subscriptionID,
+            periodID: periodID
+        )
+        if let record = try record(key: key) {
+            context.delete(record)
+        }
+    }
+
     private func record(key: String) throws -> SubscriptionSharingRecord? {
         var descriptor = FetchDescriptor<SubscriptionSharingRecord>(
             predicate: #Predicate { $0.ownerKey == key }

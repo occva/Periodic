@@ -1,6 +1,6 @@
 # iCloud 多端同步规格
 
-> 版本：1.0｜日期：2026-09-23｜状态：方案设计，尚未实现。
+> 版本：1.3｜日期：2026-10-04｜状态：实现中；同步基础设施、启用前两端摘要、设置页、非删除冲突处理，以及订阅、周期、付款、模板、分类和图片的本地收敛链路已完成。真实 CloudKit 容器联调、云端替换本机和账号切换恢复流程尚未完成。
 > 依赖：[需求文档](../requirement.md)、[架构说明](../architecture.md)、[扩展规格总则](README.md)。
 
 ## 1. 目标与非目标
@@ -244,11 +244,11 @@ CloudKit 集成测试使用独立开发容器和可替换 adapter；领域合并
 
 ## 11. 分阶段落地
 
-1. 增加 `DatasetMetadataRecord`、持久化 `storeRevision`、统一写入协调器和维护锁；现有 `.periodicdata` 导入也改用该边界。
-2. 实现 mutation journal、tombstone、纯领域合并器、图片 staging 与候选数据库安全切换；完成双本地库模拟测试。
-3. 接入 CloudKit development container，仅同步订阅和历史，不开放 UI。
-4. 完成首次迁移、状态页、冲突页和 tombstone 清理策略。
-5. 接入付款、模板、分类和图片资产。
-6. 完成账号切换、备份联动、压力测试和 production schema 部署。
+1. **已完成**：增加 `DatasetMetadataRecord`、持久化 `storeRevision`、统一串行写入协调器和维护锁；现有 `.periodicdata` 导入也使用数据集版本边界。
+2. **已完成核心链路**：实现 mutation journal、记录状态、tombstone、纯领域合并器、旧数据 bootstrap、上传批次合并、`CKRecord` 编解码、durable remote inbox 和持久冲突记录。订阅、周期、付款、用户模板、自定义分类、内置模板分类覆盖及图片均可在两个本地数据库之间收敛。
+3. **已完成图片事务边界**：图片使用内容哈希和格式元数据，下载经过 staging、验证、正式落盘、SwiftData 提交及失败补偿；业务记录先于图片到达时保持待应用，图片 tombstone 会先解除业务引用再安全删除。
+4. **已完成基础界面**：设置页可展示状态、队列、数据摘要、安全快照、立即同步和停止同步入口；冲突页支持对比业务字段，并可对非删除冲突选择“保留此 Mac”或“使用 iCloud”。删除与修改冲突仍禁止直接覆盖，后续补充“保留为新副本”流程。
+5. **进行中但未真实联调**：已实现默认不启动的 `CKSyncEngine` development adapter，包括私有 database、自定义 zone、状态检查点、journal 上传、远端 inbox、partial failure 分类、服务端版本冲突、本地写入唤醒，以及启用前不下载图片正文的云端只读摘要。账号绑定使用本地不可逆指纹持久化，运行中或重启后检测到 Apple ID 变化都会冻结同步。默认构建不带 CloudKit entitlement；仍需真实 Team ID、CloudKit container、provisioning profile 和 development schema 才能进行多设备联调。
+6. **未完成**：“使用云端替换此 Mac”的候选数据库验证和原子切换、停止同步的云端副本处理、Apple ID 切换后的保留/导出/改用当前账号 UX、删除与修改冲突的“保留为新副本”、稳定图片引用内容变化检测、压力测试及 production schema 部署。
 
 每一阶段都应保持本地模式可独立运行；不得用“先打开 CloudKit 自动同步”代替迁移、冲突和恢复设计。

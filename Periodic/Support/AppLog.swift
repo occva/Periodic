@@ -10,4 +10,9 @@ enum AppLog {
         subsystem: AppConfiguration.subsystem,
         category: "Persistence"
     )
+
+    static let cloudSync = Logger(
+        subsystem: AppConfiguration.subsystem,
+        category: "CloudSync"
+    )
 }

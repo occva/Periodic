@@ -1,5 +1,40 @@
 import SwiftUI
 
+struct TimelineEventPlacement {
+    let direction: HorizontalEdge
+    let width: CGFloat
+    let centerX: CGFloat
+
+    var leadingX: CGFloat {
+        centerX - width / 2
+    }
+
+    var trailingX: CGFloat {
+        centerX + width / 2
+    }
+
+    init(
+        anchorX: CGFloat,
+        viewportWidth: CGFloat,
+        minimumWidth: CGFloat = 150,
+        maximumWidth: CGFloat = 310,
+        minimumAnchorWidth: CGFloat = 24,
+        edgeInset: CGFloat = 8
+    ) {
+        let rightSpace = max(minimumAnchorWidth, viewportWidth - anchorX - edgeInset)
+        let leftSpace = max(minimumAnchorWidth, anchorX - edgeInset)
+        direction = rightSpace >= minimumWidth || rightSpace >= leftSpace
+            ? .trailing
+            : .leading
+
+        let availableWidth = direction == .trailing ? rightSpace : leftSpace
+        width = min(maximumWidth, max(minimumAnchorWidth, availableWidth))
+        centerX = direction == .trailing
+            ? anchorX + width / 2
+            : anchorX - width / 2
+    }
+}
+
 struct TimelineAxisLayout {
     let start: LocalDate
     let end: LocalDate

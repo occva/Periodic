@@ -4,6 +4,19 @@ import SwiftData
 
 @ModelActor
 actor DataExchangeStore {
+    private var datasetAccess = DatasetAccessCoordinator()
+
+    init(
+        modelContainer: ModelContainer,
+        datasetAccess: DatasetAccessCoordinator = DatasetAccessCoordinator()
+    ) {
+        self.modelContainer = modelContainer
+        modelExecutor = DefaultSerialModelExecutor(
+            modelContext: ModelContext(modelContainer)
+        )
+        self.datasetAccess = datasetAccess
+    }
+
     private var sharingPersistence: SubscriptionSharingPersistence {
         SubscriptionSharingPersistence(context: modelContext)
     }
@@ -164,6 +177,25 @@ actor DataExchangeStore {
         return DataPackageCodec.sha256(data)
     }
 
+    func version() async throws -> DatasetVersion {
+        let lease = try await datasetAccess.acquireWrite()
+        do {
+            let version = try DatasetMetadata.currentVersion(
+                in: modelContext,
+                descriptor: datasetAccess.descriptor
+            )
+            if modelContext.hasChanges {
+                try modelContext.save()
+            }
+            await datasetAccess.releaseWrite(lease)
+            return version
+        } catch {
+            modelContext.rollback()
+            await datasetAccess.releaseWrite(lease)
+            throw error
+        }
+    }
+
     func referencedIconReferences() throws -> Set<String> {
         let subscriptionReferences = try modelContext
             .fetch(FetchDescriptor<SubscriptionRecord>())
@@ -200,16 +232,29 @@ actor DataExchangeStore {
     func execute(
         imported: DataPackageSnapshot,
         expectedDigest: String,
+        expectedVersion: DatasetVersion? = nil,
         conflictResolution: DataImportConflictResolution
-    ) throws -> DataImportReceipt {
+    ) async throws -> DataImportReceipt {
         for value in imported.subscriptions {
             try value.sharing?.validate(myMoney: Money(minorUnits: value.amountMinor, currency: value.currency))
         }
         for value in imported.periods {
             try value.sharing?.validate(myMoney: Money(minorUnits: value.amountMinor, currency: value.currency))
         }
-        guard try digest() == expectedDigest else { throw DataExchangeError.stalePlan }
+        let lease = try await datasetAccess.acquireWrite()
         do {
+            guard try digest() == expectedDigest else {
+                throw DataExchangeError.stalePlan
+            }
+            if let expectedVersion {
+                let currentVersion = try DatasetMetadata.currentVersion(
+                    in: modelContext,
+                    descriptor: datasetAccess.descriptor
+                )
+                guard currentVersion == expectedVersion else {
+                    throw DataExchangeError.stalePlan
+                }
+            }
             let local = try snapshot()
             let localCategoriesByID = Dictionary(uniqueKeysWithValues: local.categories.map { ($0.id, $0) })
             let localSubscriptionsByID = Dictionary(uniqueKeysWithValues: local.subscriptions.map { ($0.id, $0) })
@@ -232,13 +277,32 @@ actor DataExchangeStore {
                     if localCategoriesByID[incoming.id] == incoming {
                         skipped += 1
                     } else if conflictResolution == .useImported {
+                        let previous = SyncRecordPayload.category(record)
+                        let baseRevision = record.revision
                         apply(incoming, to: record)
+                        try SyncMutationJournal.recordUpdate(
+                            in: modelContext,
+                            deviceID: datasetAccess.deviceID,
+                            recordType: .templateCategory,
+                            recordID: record.id.uuidString,
+                            previous: previous,
+                            current: SyncRecordPayload.category(record),
+                            legacyBaseRevision: baseRevision
+                        )
                         updated += 1
                     } else {
                         skipped += 1
                     }
                 } else {
-                    modelContext.insert(makeCategory(incoming))
+                    let record = makeCategory(incoming)
+                    modelContext.insert(record)
+                    try SyncMutationJournal.recordCreate(
+                        in: modelContext,
+                        deviceID: datasetAccess.deviceID,
+                        recordType: .templateCategory,
+                        recordID: record.id.uuidString,
+                        fieldValues: SyncRecordPayload.category(record)
+                    )
                     added += 1
                 }
             }
@@ -250,14 +314,42 @@ actor DataExchangeStore {
                     if localSubscriptionsByID[incoming.id] == incoming {
                         skipped += 1
                     } else if conflictResolution == .useImported {
+                        let previous = try SyncRecordPayload.subscription(
+                            record,
+                            sharing: localSubscriptionsByID[incoming.id]?.sharing
+                        )
+                        let baseRevision = record.revision
                         try apply(incoming, to: record)
+                        try SyncMutationJournal.recordUpdate(
+                            in: modelContext,
+                            deviceID: datasetAccess.deviceID,
+                            recordType: .subscription,
+                            recordID: record.id.uuidString,
+                            previous: previous,
+                            current: try SyncRecordPayload.subscription(
+                                record,
+                                sharing: incoming.sharing
+                            ),
+                            legacyBaseRevision: baseRevision
+                        )
                         updatedSubscriptionIDs.insert(record.id)
                         updated += 1
                     } else {
                         skipped += 1
                     }
                 } else {
-                    modelContext.insert(try makeSubscription(incoming))
+                    let record = try makeSubscription(incoming)
+                    modelContext.insert(record)
+                    try SyncMutationJournal.recordCreate(
+                        in: modelContext,
+                        deviceID: datasetAccess.deviceID,
+                        recordType: .subscription,
+                        recordID: record.id.uuidString,
+                        fieldValues: try SyncRecordPayload.subscription(
+                            record,
+                            sharing: incoming.sharing
+                        )
+                    )
                     added += 1
                 }
             }
@@ -275,14 +367,40 @@ actor DataExchangeStore {
                         skipped += 1
                     } else if conflictResolution == .useImported {
                         changedHistorySubscriptionIDs.insert(record.subscriptionID)
+                        let previous = try SyncRecordPayload.period(
+                            record,
+                            sharing: localPeriodsByID[incoming.id]?.sharing
+                        )
                         try apply(incoming, to: record)
+                        try SyncMutationJournal.recordUpdate(
+                            in: modelContext,
+                            deviceID: datasetAccess.deviceID,
+                            recordType: .subscriptionPeriod,
+                            recordID: record.id.uuidString,
+                            previous: previous,
+                            current: try SyncRecordPayload.period(
+                                record,
+                                sharing: incoming.sharing
+                            )
+                        )
                         changedHistorySubscriptionIDs.insert(incoming.subscriptionID)
                         updated += 1
                     } else {
                         skipped += 1
                     }
                 } else {
-                    modelContext.insert(try makePeriod(incoming))
+                    let record = try makePeriod(incoming)
+                    modelContext.insert(record)
+                    try SyncMutationJournal.recordCreate(
+                        in: modelContext,
+                        deviceID: datasetAccess.deviceID,
+                        recordType: .subscriptionPeriod,
+                        recordID: record.id.uuidString,
+                        fieldValues: try SyncRecordPayload.period(
+                            record,
+                            sharing: incoming.sharing
+                        )
+                    )
                     changedHistorySubscriptionIDs.insert(incoming.subscriptionID)
                     added += 1
                 }
@@ -316,11 +434,29 @@ actor DataExchangeStore {
                         skipped += 1
                     } else if conflictResolution == .useImported {
                         changedHistorySubscriptionIDs.insert(record.subscriptionID)
+                        let previous = SyncRecordPayload.payment(
+                            record,
+                            attachmentReferences: localPaymentsByID[incoming.id]?
+                                .attachmentAssetIDs ?? []
+                        )
+                        let baseRevision = record.revision
                         apply(incoming, to: record)
                         try replacePaymentAttachments(
                             incoming.attachmentAssetIDs,
                             paymentID: incoming.id,
                             existing: paymentAttachmentsByPaymentID[incoming.id] ?? []
+                        )
+                        try SyncMutationJournal.recordUpdate(
+                            in: modelContext,
+                            deviceID: datasetAccess.deviceID,
+                            recordType: .subscriptionPayment,
+                            recordID: record.id.uuidString,
+                            previous: previous,
+                            current: SyncRecordPayload.payment(
+                                record,
+                                attachmentReferences: incoming.attachmentAssetIDs
+                            ),
+                            legacyBaseRevision: baseRevision
                         )
                         changedHistorySubscriptionIDs.insert(incoming.subscriptionID)
                         updated += 1
@@ -328,11 +464,22 @@ actor DataExchangeStore {
                         skipped += 1
                     }
                 } else {
-                    modelContext.insert(makePayment(incoming))
+                    let record = makePayment(incoming)
+                    modelContext.insert(record)
                     try replacePaymentAttachments(
                         incoming.attachmentAssetIDs,
                         paymentID: incoming.id,
                         existing: []
+                    )
+                    try SyncMutationJournal.recordCreate(
+                        in: modelContext,
+                        deviceID: datasetAccess.deviceID,
+                        recordType: .subscriptionPayment,
+                        recordID: record.id.uuidString,
+                        fieldValues: SyncRecordPayload.payment(
+                            record,
+                            attachmentReferences: incoming.attachmentAssetIDs
+                        )
                     )
                     changedHistorySubscriptionIDs.insert(incoming.subscriptionID)
                     added += 1
@@ -351,13 +498,32 @@ actor DataExchangeStore {
                     if localTemplatesByID[incoming.id] == incoming {
                         skipped += 1
                     } else if conflictResolution == .useImported {
+                        let previous = try SyncRecordPayload.template(record)
+                        let baseRevision = record.revision
                         try apply(incoming, to: record)
+                        try SyncMutationJournal.recordUpdate(
+                            in: modelContext,
+                            deviceID: datasetAccess.deviceID,
+                            recordType: .serviceTemplate,
+                            recordID: record.id.uuidString,
+                            previous: previous,
+                            current: try SyncRecordPayload.template(record),
+                            legacyBaseRevision: baseRevision
+                        )
                         updated += 1
                     } else {
                         skipped += 1
                     }
                 } else {
-                    modelContext.insert(try makeTemplate(incoming))
+                    let record = try makeTemplate(incoming)
+                    modelContext.insert(record)
+                    try SyncMutationJournal.recordCreate(
+                        in: modelContext,
+                        deviceID: datasetAccess.deviceID,
+                        recordType: .serviceTemplate,
+                        recordID: record.id.uuidString,
+                        fieldValues: try SyncRecordPayload.template(record)
+                    )
                     added += 1
                 }
             }
@@ -375,13 +541,33 @@ actor DataExchangeStore {
                     if localAssignmentsByKey[incoming.templateKey] == incoming {
                         skipped += 1
                     } else if conflictResolution == .useImported {
+                        let previous = SyncRecordPayload
+                            .builtinCategoryAssignment(record)
                         apply(incoming, to: record)
+                        try SyncMutationJournal.recordUpdate(
+                            in: modelContext,
+                            deviceID: datasetAccess.deviceID,
+                            recordType: .builtinTemplateCategoryAssignment,
+                            recordID: record.templateKey,
+                            previous: previous,
+                            current: SyncRecordPayload
+                                .builtinCategoryAssignment(record)
+                        )
                         updated += 1
                     } else {
                         skipped += 1
                     }
                 } else {
-                    modelContext.insert(makeAssignment(incoming))
+                    let record = makeAssignment(incoming)
+                    modelContext.insert(record)
+                    try SyncMutationJournal.recordCreate(
+                        in: modelContext,
+                        deviceID: datasetAccess.deviceID,
+                        recordType: .builtinTemplateCategoryAssignment,
+                        recordID: record.templateKey,
+                        fieldValues: SyncRecordPayload
+                            .builtinCategoryAssignment(record)
+                    )
                     added += 1
                 }
             }
@@ -391,10 +577,19 @@ actor DataExchangeStore {
                     && !updatedSubscriptionIDs.contains(subscription.id) {
                 subscription.markHistoryChanged()
             }
-            try modelContext.save()
-            return DataImportReceipt(added: added, updated: updated, skipped: skipped)
+            if added > 0 || updated > 0 {
+                try DatasetMetadata.advanceRevision(
+                    in: modelContext,
+                    descriptor: datasetAccess.descriptor
+                )
+                try modelContext.save()
+            }
+            let receipt = DataImportReceipt(added: added, updated: updated, skipped: skipped)
+            await datasetAccess.releaseWrite(lease)
+            return receipt
         } catch {
             modelContext.rollback()
+            await datasetAccess.releaseWrite(lease)
             throw error
         }
     }

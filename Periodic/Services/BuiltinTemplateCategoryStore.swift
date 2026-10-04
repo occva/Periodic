@@ -11,6 +11,19 @@ actor BuiltinTemplateCategoryStore {
         }
     }
 
+    private var datasetAccess = DatasetAccessCoordinator()
+
+    init(
+        modelContainer: ModelContainer,
+        datasetAccess: DatasetAccessCoordinator = DatasetAccessCoordinator()
+    ) {
+        self.modelContainer = modelContainer
+        modelExecutor = DefaultSerialModelExecutor(
+            modelContext: ModelContext(modelContainer)
+        )
+        self.datasetAccess = datasetAccess
+    }
+
     func fetchAssignments() throws -> [String: TemplateCategoryAssignment] {
         let records = try modelContext.fetch(
             FetchDescriptor<BuiltinTemplateCategoryAssignmentRecord>()
@@ -46,7 +59,11 @@ actor BuiltinTemplateCategoryStore {
         return assignments
     }
 
-    func assign(_ assignment: TemplateCategoryAssignment, toBuiltinTemplate key: String) throws {
+    func assign(
+        _ assignment: TemplateCategoryAssignment,
+        toBuiltinTemplate key: String
+    ) async throws {
+        let lease = try await datasetAccess.acquireWrite()
         do {
             if let categoryID = assignment.customCategoryID {
                 var categoryDescriptor = FetchDescriptor<TemplateCategoryRecord>(
@@ -62,18 +79,41 @@ actor BuiltinTemplateCategoryStore {
                 FetchDescriptor<BuiltinTemplateCategoryAssignmentRecord>()
             )
             if let record = records.first(where: { $0.templateKey == key }) {
+                let previous = SyncRecordPayload.builtinCategoryAssignment(record)
                 record.apply(assignment)
+                try SyncMutationJournal.recordUpdate(
+                    in: modelContext,
+                    deviceID: datasetAccess.deviceID,
+                    recordType: .builtinTemplateCategoryAssignment,
+                    recordID: record.templateKey,
+                    previous: previous,
+                    current: SyncRecordPayload.builtinCategoryAssignment(record)
+                )
             } else {
-                modelContext.insert(
-                    BuiltinTemplateCategoryAssignmentRecord(
-                        templateKey: key,
-                        assignment: assignment
+                let record = BuiltinTemplateCategoryAssignmentRecord(
+                    templateKey: key,
+                    assignment: assignment
+                )
+                modelContext.insert(record)
+                try SyncMutationJournal.recordCreate(
+                    in: modelContext,
+                    deviceID: datasetAccess.deviceID,
+                    recordType: .builtinTemplateCategoryAssignment,
+                    recordID: record.templateKey,
+                    fieldValues: SyncRecordPayload.builtinCategoryAssignment(
+                        record
                     )
                 )
             }
+            try DatasetMetadata.advanceRevision(
+                in: modelContext,
+                descriptor: datasetAccess.descriptor
+            )
             try modelContext.save()
+            await datasetAccess.releaseWrite(lease)
         } catch {
             modelContext.rollback()
+            await datasetAccess.releaseWrite(lease)
             throw error
         }
     }

@@ -11,12 +11,19 @@ struct SettingsView: View {
 
             DataSettingsView()
                 .tabItem { Label("数据", systemImage: "externaldrive") }
+
+            CloudSyncSettingsView(
+                coordinator: services.cloudSyncCoordinator
+            )
+            .tabItem { Label("iCloud", systemImage: "icloud") }
         }
         .frame(width: 640, height: 560)
         .onAppear {
             AppLog.lifecycle.info("Settings window appeared")
         }
     }
+
+    @Environment(AppServices.self) private var services
 }
 
 #Preview {

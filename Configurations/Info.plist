@@ -24,6 +24,8 @@
     <string>public.app-category.utilities</string>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
+    <key>PeriodicICloudContainerIdentifier</key>
+    <string>$(PERIODIC_ICLOUD_CONTAINER_IDENTIFIER)</string>
     <key>UTExportedTypeDeclarations</key>
     <array>
         <dict>

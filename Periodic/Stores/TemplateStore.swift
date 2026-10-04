@@ -19,6 +19,19 @@ actor TemplateStore {
         }
     }
 
+    private var datasetAccess = DatasetAccessCoordinator()
+
+    init(
+        modelContainer: ModelContainer,
+        datasetAccess: DatasetAccessCoordinator = DatasetAccessCoordinator()
+    ) {
+        self.modelContainer = modelContainer
+        modelExecutor = DefaultSerialModelExecutor(
+            modelContext: ModelContext(modelContainer)
+        )
+        self.datasetAccess = datasetAccess
+    }
+
     func fetchAll() throws -> [ServiceTemplateDTO] {
         let descriptor = FetchDescriptor<ServiceTemplateRecord>(
             sortBy: [SortDescriptor(\.name, order: .forward)]
@@ -59,8 +72,8 @@ actor TemplateStore {
         return templates
     }
 
-    func save(_ input: ServiceTemplateInput) throws {
-        do {
+    func save(_ input: ServiceTemplateInput) async throws {
+        try await commit {
             let aliases = normalizedAliases(input.aliases)
             let aliasesData = try JSONEncoder().encode(aliases)
             if let categoryID = input.customCategoryID {
@@ -80,20 +93,37 @@ actor TemplateStore {
                       record.revision == expectedRevision else {
                     throw StoreError.revisionConflict
                 }
+                let previous = try SyncRecordPayload.template(record)
                 record.apply(input, aliasesData: aliasesData)
+                try SyncMutationJournal.recordUpdate(
+                    in: modelContext,
+                    deviceID: datasetAccess.deviceID,
+                    recordType: .serviceTemplate,
+                    recordID: record.id.uuidString,
+                    previous: previous,
+                    current: try SyncRecordPayload.template(record),
+                    legacyBaseRevision: expectedRevision
+                )
             } else {
                 guard input.expectedRevision == nil else { throw StoreError.notFound }
-                modelContext.insert(ServiceTemplateRecord(input: input, aliasesData: aliasesData))
+                let record = ServiceTemplateRecord(
+                    input: input,
+                    aliasesData: aliasesData
+                )
+                modelContext.insert(record)
+                try SyncMutationJournal.recordCreate(
+                    in: modelContext,
+                    deviceID: datasetAccess.deviceID,
+                    recordType: .serviceTemplate,
+                    recordID: record.id.uuidString,
+                    fieldValues: try SyncRecordPayload.template(record)
+                )
             }
-            try modelContext.save()
-        } catch {
-            modelContext.rollback()
-            throw error
         }
     }
 
-    func delete(id: UUID, expectedRevision: Int64) throws {
-        do {
+    func delete(id: UUID, expectedRevision: Int64) async throws {
+        try await commit {
             let records = try modelContext.fetch(FetchDescriptor<ServiceTemplateRecord>())
             guard let record = records.first(where: { $0.id == id }) else {
                 throw StoreError.notFound
@@ -101,10 +131,30 @@ actor TemplateStore {
             guard record.revision == expectedRevision else {
                 throw StoreError.revisionConflict
             }
+            try SyncMutationJournal.recordDelete(
+                in: modelContext,
+                deviceID: datasetAccess.deviceID,
+                recordType: .serviceTemplate,
+                recordID: record.id.uuidString,
+                legacyBaseRevision: expectedRevision
+            )
             modelContext.delete(record)
+        }
+    }
+
+    private func commit(_ changes: () throws -> Void) async throws {
+        let lease = try await datasetAccess.acquireWrite()
+        do {
+            try changes()
+            try DatasetMetadata.advanceRevision(
+                in: modelContext,
+                descriptor: datasetAccess.descriptor
+            )
             try modelContext.save()
+            await datasetAccess.releaseWrite(lease)
         } catch {
             modelContext.rollback()
+            await datasetAccess.releaseWrite(lease)
             throw error
         }
     }

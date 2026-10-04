@@ -277,6 +277,71 @@ enum AppSchemaV6: VersionedSchema {
     }
 }
 
+enum AppSchemaV7: VersionedSchema {
+    static var versionIdentifier: Schema.Version { Schema.Version(7, 0, 0) }
+
+    static var models: [any PersistentModel.Type] {
+        AppSchemaV6.models + [DatasetMetadataRecord.self]
+    }
+}
+
+enum AppSchemaV8: VersionedSchema {
+    static var versionIdentifier: Schema.Version { Schema.Version(8, 0, 0) }
+
+    static var models: [any PersistentModel.Type] {
+        AppSchemaV7.models + [
+            SyncMutationRecord.self,
+            SyncRecordStateRecord.self,
+        ]
+    }
+
+    /// Frozen V8 shape. Later versions added CloudKit system fields, so V8 must
+    /// retain the exact model checksum already written to existing stores.
+    @Model
+    final class SyncRecordStateRecord {
+        @Attribute(.unique) var recordKey: String
+        var recordTypeRaw: String
+        var recordID: String
+        var revision: Int64
+        var modifiedAt: Date
+        var modifiedByDeviceID: UUID
+        var isDeleted: Bool
+        var deletedAt: Date?
+
+        init(
+            recordType: SyncRecordType,
+            recordID: String,
+            revision: Int64,
+            modifiedAt: Date,
+            modifiedByDeviceID: UUID,
+            isDeleted: Bool,
+            deletedAt: Date?
+        ) {
+            recordKey = recordType.rawValue + ":" + recordID
+            recordTypeRaw = recordType.rawValue
+            self.recordID = recordID
+            self.revision = revision
+            self.modifiedAt = modifiedAt
+            self.modifiedByDeviceID = modifiedByDeviceID
+            self.isDeleted = isDeleted
+            self.deletedAt = deletedAt
+        }
+    }
+}
+
+enum AppSchemaV9: VersionedSchema {
+    static var versionIdentifier: Schema.Version { Schema.Version(9, 0, 0) }
+
+    static var models: [any PersistentModel.Type] {
+        AppSchemaV7.models + [
+            SyncMutationRecord.self,
+            SyncRecordStateRecord.self,
+            SyncRemoteChangeRecord.self,
+            SyncConflictRecord.self,
+        ]
+    }
+}
+
 enum AppSchemaMigrationPlan: SchemaMigrationPlan {
     static var schemas: [any VersionedSchema.Type] {
         [
@@ -286,6 +351,9 @@ enum AppSchemaMigrationPlan: SchemaMigrationPlan {
             AppSchemaV4.self,
             AppSchemaV5.self,
             AppSchemaV6.self,
+            AppSchemaV7.self,
+            AppSchemaV8.self,
+            AppSchemaV9.self,
         ]
     }
 
@@ -301,6 +369,9 @@ enum AppSchemaMigrationPlan: SchemaMigrationPlan {
                 didMigrate: migratePaymentAttachmentsToOrderedItems
             ),
             .lightweight(fromVersion: AppSchemaV5.self, toVersion: AppSchemaV6.self),
+            .lightweight(fromVersion: AppSchemaV6.self, toVersion: AppSchemaV7.self),
+            .lightweight(fromVersion: AppSchemaV7.self, toVersion: AppSchemaV8.self),
+            .lightweight(fromVersion: AppSchemaV8.self, toVersion: AppSchemaV9.self),
         ]
     }
 

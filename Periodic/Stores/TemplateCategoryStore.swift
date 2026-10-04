@@ -19,6 +19,19 @@ actor TemplateCategoryStore {
         }
     }
 
+    private var datasetAccess = DatasetAccessCoordinator()
+
+    init(
+        modelContainer: ModelContainer,
+        datasetAccess: DatasetAccessCoordinator = DatasetAccessCoordinator()
+    ) {
+        self.modelContainer = modelContainer
+        modelExecutor = DefaultSerialModelExecutor(
+            modelContext: ModelContext(modelContainer)
+        )
+        self.datasetAccess = datasetAccess
+    }
+
     func fetchAll() throws -> [TemplateCategoryDTO] {
         let descriptor = FetchDescriptor<TemplateCategoryRecord>(
             sortBy: [SortDescriptor(\.name, order: .forward)]
@@ -28,11 +41,14 @@ actor TemplateCategoryStore {
         }
     }
 
-    func save(_ input: TemplateCategoryInput) throws {
+    func save(_ input: TemplateCategoryInput) async throws {
+        let lease = try await datasetAccess.acquireWrite()
         do {
             try saveChanges(input)
+            await datasetAccess.releaseWrite(lease)
         } catch {
             modelContext.rollback()
+            await datasetAccess.releaseWrite(lease)
             throw error
         }
     }
@@ -65,19 +81,44 @@ actor TemplateCategoryStore {
             guard category.revision == input.expectedRevision else {
                 throw StoreError.revisionConflict
             }
+            let previous = SyncRecordPayload.category(category)
             category.apply(normalizedInput)
+            try SyncMutationJournal.recordUpdate(
+                in: modelContext,
+                deviceID: datasetAccess.deviceID,
+                recordType: .templateCategory,
+                recordID: category.id.uuidString,
+                previous: previous,
+                current: SyncRecordPayload.category(category),
+                legacyBaseRevision: input.expectedRevision ?? category.revision - 1
+            )
         } else {
             guard input.expectedRevision == nil else { throw StoreError.notFound }
-            modelContext.insert(TemplateCategoryRecord(input: normalizedInput))
+            let category = TemplateCategoryRecord(input: normalizedInput)
+            modelContext.insert(category)
+            try SyncMutationJournal.recordCreate(
+                in: modelContext,
+                deviceID: datasetAccess.deviceID,
+                recordType: .templateCategory,
+                recordID: category.id.uuidString,
+                fieldValues: SyncRecordPayload.category(category)
+            )
         }
+        try DatasetMetadata.advanceRevision(
+            in: modelContext,
+            descriptor: datasetAccess.descriptor
+        )
         try modelContext.save()
     }
 
-    func delete(id: UUID, expectedRevision: Int64) throws {
+    func delete(id: UUID, expectedRevision: Int64) async throws {
+        let lease = try await datasetAccess.acquireWrite()
         do {
             try deleteChanges(id: id, expectedRevision: expectedRevision)
+            await datasetAccess.releaseWrite(lease)
         } catch {
             modelContext.rollback()
+            await datasetAccess.releaseWrite(lease)
             throw error
         }
     }
@@ -93,19 +134,50 @@ actor TemplateCategoryStore {
 
         let templates = try modelContext.fetch(FetchDescriptor<ServiceTemplateRecord>())
         for template in templates where template.customCategoryID == id {
+            let previous = try SyncRecordPayload.template(template)
+            let baseRevision = template.revision
             template.customCategoryID = nil
             template.categoryRaw = ServiceCategory.other.rawValue
             template.revision += 1
             template.updatedAt = Date()
+            try SyncMutationJournal.recordUpdate(
+                in: modelContext,
+                deviceID: datasetAccess.deviceID,
+                recordType: .serviceTemplate,
+                recordID: template.id.uuidString,
+                previous: previous,
+                current: try SyncRecordPayload.template(template),
+                legacyBaseRevision: baseRevision
+            )
         }
 
         let builtinAssignments = try modelContext.fetch(
             FetchDescriptor<BuiltinTemplateCategoryAssignmentRecord>()
         )
         for assignment in builtinAssignments where assignment.customCategoryID == id {
+            let previous = SyncRecordPayload.builtinCategoryAssignment(assignment)
             assignment.apply(.builtin(.other))
+            try SyncMutationJournal.recordUpdate(
+                in: modelContext,
+                deviceID: datasetAccess.deviceID,
+                recordType: .builtinTemplateCategoryAssignment,
+                recordID: assignment.templateKey,
+                previous: previous,
+                current: SyncRecordPayload.builtinCategoryAssignment(assignment)
+            )
         }
+        try SyncMutationJournal.recordDelete(
+            in: modelContext,
+            deviceID: datasetAccess.deviceID,
+            recordType: .templateCategory,
+            recordID: category.id.uuidString,
+            legacyBaseRevision: expectedRevision
+        )
         modelContext.delete(category)
+        try DatasetMetadata.advanceRevision(
+            in: modelContext,
+            descriptor: datasetAccess.descriptor
+        )
         try modelContext.save()
     }
 }

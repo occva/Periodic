@@ -8,7 +8,7 @@ actor AppleIconCache {
         fileprivate let lease: ImageWriteLeases.Lease
     }
 
-    enum CacheError: LocalizedError {
+    enum CacheError: LocalizedError, Equatable {
         case invalidURL
         case invalidReference
         case unsupportedHost
@@ -48,8 +48,8 @@ actor AppleIconCache {
         self.storageRoot = storageRoot
     }
 
-    private static let referencePrefix = "apple-icon:"
-    private static let localReferencePrefix = "user-icon:"
+    static let referencePrefix = "apple-icon:"
+    static let localReferencePrefix = "user-icon:"
     func persist(from url: URL) async throws -> String {
         guard url.scheme == "https" else { throw CacheError.invalidURL }
         guard let host = url.host?.lowercased(),
@@ -132,6 +132,38 @@ actor AppleIconCache {
             key: key,
             lease: imageWriteLeases.acquire(for: reference)
         )
+    }
+
+    func persistCloudImage(_ data: Data, reference: String) throws {
+        guard data.count <= ImageAssetValidator.maximumImageSize else {
+            throw CacheError.imageTooLarge
+        }
+        try validateImageData(data)
+        let key: String
+        let directory: URL
+        if reference.hasPrefix(Self.referencePrefix) {
+            key = String(reference.dropFirst(Self.referencePrefix.count))
+            try validateCacheKey(key)
+            directory = try storedIconDirectory()
+        } else if reference.hasPrefix(Self.localReferencePrefix) {
+            key = String(reference.dropFirst(Self.localReferencePrefix.count))
+            try validateCacheKey(key)
+            guard cacheKey(for: data) == key else {
+                throw CacheError.invalidReference
+            }
+            directory = try storedLocalIconDirectory()
+        } else {
+            throw CacheError.invalidReference
+        }
+        let destination = directory
+            .appending(path: key)
+            .appendingPathExtension("image")
+        try data.write(to: destination, options: .atomic)
+    }
+
+    static func isStoredReference(_ reference: String) -> Bool {
+        reference.hasPrefix(referencePrefix)
+            || reference.hasPrefix(localReferencePrefix)
     }
 
     func discardImportedImages(

@@ -214,6 +214,7 @@ struct ContentView: View {
             do {
                 try await services.prepareStoredSubscriptionData()
                 try await services.prepareDevelopmentDataIfRequested()
+                await services.cloudSyncCoordinator.prepareIfEnabled()
             } catch {
                 session.loadError = PresentedError(error, title: "无法准备订阅数据")
             }
@@ -237,6 +238,8 @@ struct ContentView: View {
             if phase == .active {
                 Task { @MainActor in
                     await session.reload(using: services)
+                    await services.cloudSyncCoordinator
+                        .applicationDidBecomeActive()
                 }
             }
         }

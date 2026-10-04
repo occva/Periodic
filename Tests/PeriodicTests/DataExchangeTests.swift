@@ -264,6 +264,78 @@ struct DataExchangeTests {
         )
     }
 
+    @MainActor
+    @Test func assetPreviewCountsReferencedFilesWithoutPreparingPackage() async throws {
+        let storageRoot = FileManager.default.temporaryDirectory
+            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        defer { try? FileManager.default.removeItem(at: storageRoot) }
+        let imageData = try #require(Data(base64Encoded: Self.onePixelPNG))
+        let iconCache = AppleIconCache(storageRoot: storageRoot)
+        let attachmentStore = PaymentAttachmentStore(
+            storageRoot: storageRoot
+        )
+        let iconWrite = try await iconCache.persistImportedImage(imageData)
+        await iconCache.releaseImportedImages([iconWrite])
+        let attachmentWrite = try await attachmentStore.persistImportedImage(
+            imageData
+        )
+        await attachmentStore.releaseImportedImages([attachmentWrite])
+
+        let container = try makeContainer()
+        let subscriptionStore = SubscriptionStore(
+            modelContainer: container
+        )
+        let base = makeSubscriptionInput()
+        let input = SubscriptionCreateInput(
+            id: base.id,
+            name: base.name,
+            symbolName: base.symbolName,
+            iconResourceName: nil,
+            iconURLString: iconWrite.reference,
+            category: base.category,
+            managementState: base.managementState,
+            billingKind: base.billingKind,
+            periodStart: base.periodStart,
+            expiry: base.expiry,
+            cycleMonths: base.cycleMonths,
+            money: base.money,
+            note: base.note,
+            reminderEnabled: base.reminderEnabled,
+            automaticallyRenews: base.automaticallyRenews
+        )
+        _ = try await subscriptionStore.create(input)
+        let subscription = try #require(
+            try await subscriptionStore.fetchAll().first
+        )
+        try await subscriptionStore.addPayment(
+            SubscriptionPaymentAddInput(
+                payment: SubscriptionPaymentCreateInput(
+                    id: UUID(),
+                    subscriptionID: subscription.id,
+                    periodRecordID: nil,
+                    kind: .manual,
+                    paymentDate: .today,
+                    money: input.money,
+                    periodStart: nil,
+                    periodEnd: nil,
+                    note: "",
+                    attachmentReferences: [attachmentWrite.reference]
+                ),
+                expectedSubscriptionRevision: subscription.revision
+            )
+        )
+        let service = DataExchangeService(
+            store: DataExchangeStore(modelContainer: container),
+            iconCache: iconCache,
+            paymentAttachmentStore: attachmentStore
+        )
+
+        let preview = try await service.previewAssets()
+
+        #expect(preview.assetCount == 2)
+        #expect(preview.estimatedBytes == Int64(imageData.count * 2))
+    }
+
     @Test func legacySubscriptionWithoutReminderScheduleUsesImportDefaults() throws {
         let value = try #require(
             makeSnapshot(

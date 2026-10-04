@@ -9,7 +9,7 @@ actor PaymentAttachmentStore {
         fileprivate let lease: ImageWriteLeases.Lease
     }
 
-    enum StoreError: LocalizedError {
+    enum StoreError: LocalizedError, Equatable {
         case invalidReference
         case invalidImage
         case unsupportedImageType
@@ -63,6 +63,26 @@ actor PaymentAttachmentStore {
 
     func persistImportedImage(_ data: Data) throws -> ImportedImageWrite {
         try persistImage(data)
+    }
+
+    func persistCloudImage(_ data: Data, reference: String) throws {
+        let expectedHash = try cacheKey(from: reference)
+        let format = try validate(data)
+        let actualHash = SHA256.hash(data: data)
+            .map { String(format: "%02x", $0) }
+            .joined()
+        guard actualHash == expectedHash else {
+            throw StoreError.invalidReference
+        }
+        let existingURL = try storedImageURL(key: expectedHash)
+        let destination = try storedImageDirectory()
+            .appending(path: expectedHash)
+            .appendingPathExtension(format.filenameExtension)
+        if existingURL == nil {
+            try data.write(to: destination, options: .atomic)
+        } else if let existingURL, existingURL.pathExtension == "image" {
+            try fileManager.moveItem(at: existingURL, to: destination)
+        }
     }
 
     func data(for reference: String) throws -> Data {

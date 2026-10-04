@@ -10,6 +10,11 @@ CLANG_CXX_LANGUAGE_STANDARD = gnu++20
 CODE_SIGN_STYLE = Manual
 CODE_SIGN_IDENTITY = -
 DEVELOPMENT_TEAM =
+PERIODIC_CODE_SIGN_ENTITLEMENTS = Configurations/Periodic.entitlements
+PERIODIC_ICLOUD_CONTAINER_IDENTIFIER =
+// CloudKit builds must override both values in a developer-local xcconfig.
+// PERIODIC_CODE_SIGN_ENTITLEMENTS = Configurations/PeriodicCloudKit.entitlements
+// PERIODIC_ICLOUD_CONTAINER_IDENTIFIER = iCloud.local.lhg.Periodic
 MARKETING_VERSION = 0.1.0
 CURRENT_PROJECT_VERSION = 1
 ENABLE_USER_SCRIPT_SANDBOXING = YES
