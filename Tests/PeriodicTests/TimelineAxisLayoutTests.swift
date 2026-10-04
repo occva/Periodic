@@ -31,6 +31,35 @@ struct TimelineAxisLayoutTests {
         #expect(layout.dayOffset(forHorizontalScroll: 20, viewportWidth: 0) == 0)
     }
 
+    @Test func futureEventLabelDoesNotCrossTodayMarker() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try #require(TimeZone(identifier: "Asia/Shanghai"))
+        let todayDate = try #require(
+            calendar.date(from: DateComponents(year: 2026, month: 10, day: 4, hour: 12))
+        )
+        let today = LocalDate(todayDate, calendar: calendar)
+        let expiry = LocalDate(dayNumber: today.dayNumber + 2)
+        let layout = TimelineAxisLayout(centerDate: todayDate, range: .threeYears)
+        let todayX = layout.x(for: today, width: 1_000)
+        let expiryX = layout.x(for: expiry, width: 1_000)
+        let futurePlacement = TimelineEventPlacement(
+            anchorX: expiryX,
+            viewportWidth: 1_000
+        )
+
+        #expect(futurePlacement.direction == .trailing)
+        #expect(abs(futurePlacement.leadingX - expiryX) < 0.001)
+        #expect(futurePlacement.leadingX > todayX)
+
+        let nearRightEdgePlacement = TimelineEventPlacement(
+            anchorX: 980,
+            viewportWidth: 1_000
+        )
+
+        #expect(nearRightEdgePlacement.direction == .leading)
+        #expect(nearRightEdgePlacement.trailingX == 980)
+    }
+
     @Test func timelineSortSupportsTimeCostMetadataAndStatusFields() throws {
         let referenceDate = try LocalDate(iso8601Text: "2026-10-04")
         let expired = makeItem(
