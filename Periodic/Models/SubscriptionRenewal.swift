@@ -41,6 +41,11 @@ struct SubscriptionRenewalPreview: Equatable, Sendable {
     let nextExpiry: LocalDate
     let cycleMonths: Int
     let money: Money
+    var sharing: SubscriptionSharingPlan? = nil
+
+    var defaultPaymentMoney: Money {
+        sharing?.defaultPaymentMoney(myMoney: money) ?? money
+    }
 }
 
 extension SubscriptionRenewalPreview: Identifiable {
@@ -97,7 +102,11 @@ enum SubscriptionRenewalRule {
             nextStart: nextStart,
             nextExpiry: nextExpiry,
             cycleMonths: cycleMonths,
-            money: requestedMoney ?? subscription.money
+            money: requestedMoney ?? subscription.money,
+            sharing: try subscription.sharing?.prorated(
+                from: subscription.cycleMonths ?? cycleMonths,
+                to: cycleMonths
+            )
         )
     }
 }

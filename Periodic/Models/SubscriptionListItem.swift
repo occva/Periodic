@@ -12,6 +12,7 @@ struct SubscriptionListItem: Identifiable, Hashable, Sendable {
     let periodStart: LocalDate?
     let expiry: LocalDate?
     let cycleMonths: Int?
+    let sharing: SubscriptionSharingPlan?
     let money: Money
     let note: String
     let reminderEnabled: Bool
@@ -29,6 +30,7 @@ struct SubscriptionListItem: Identifiable, Hashable, Sendable {
         periodStart = dto.periodStart
         expiry = dto.expiry
         cycleMonths = dto.cycleMonths
+        sharing = dto.sharing
         money = dto.money
         note = dto.note
         reminderEnabled = dto.reminderEnabled

@@ -115,7 +115,7 @@ struct SubscriptionAnalyticsTests {
     @Test func bulkDatasetPersistsInOneStoreOperation() async throws {
         let controller = PersistenceController()
         let container = try controller.makeContainer(
-            schema: Schema([SubscriptionRecord.self, SubscriptionPeriodRecord.self]),
+            schema: Schema([SubscriptionSharingRecord.self, SubscriptionRecord.self, SubscriptionPeriodRecord.self]),
             inMemory: true
         )
         let store = SubscriptionStore(modelContainer: container)
@@ -392,7 +392,7 @@ struct SubscriptionAnalyticsTests {
     @Test func developmentDatasetContainsMultipleSubscriptionOccurrences() async throws {
         let controller = PersistenceController()
         let container = try controller.makeContainer(
-            schema: Schema([SubscriptionRecord.self, SubscriptionPeriodRecord.self]),
+            schema: Schema([SubscriptionSharingRecord.self, SubscriptionRecord.self, SubscriptionPeriodRecord.self]),
             inMemory: true
         )
         let store = SubscriptionStore(modelContainer: container)

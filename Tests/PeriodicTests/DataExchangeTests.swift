@@ -87,7 +87,7 @@ struct DataExchangeTests {
         )
         #expect(decoded.assets[firstIdentifier] == firstImageData)
         #expect(decoded.assets[secondIdentifier] == secondImageData)
-        #expect(decoded.manifest.formatVersion == 4)
+        #expect(decoded.manifest.formatVersion == 5)
     }
 
     @Test func versionTwoPaymentWithoutScreenshotFieldRemainsReadable() throws {
@@ -789,6 +789,7 @@ struct DataExchangeTests {
     private func makeContainer() throws -> ModelContainer {
         try PersistenceController().makeContainer(
             schema: Schema([
+                SubscriptionSharingRecord.self,
                 SubscriptionRecord.self,
                 SubscriptionPeriodRecord.self,
                 SubscriptionPaymentRecord.self,

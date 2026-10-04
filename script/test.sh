@@ -30,12 +30,6 @@ case "$MODE" in
       -skip-testing:PeriodicTests/SubscriptionPerformanceTests
     )
     ;;
-  --ui)
-    TEST_FILTER=(-only-testing:PeriodicUITests)
-    ;;
-  --all)
-    TEST_FILTER=(-skip-testing:PeriodicTests/SubscriptionPerformanceTests)
-    ;;
   --failed)
     if [[ -z "$SOURCE_RESULT" ]]; then
       SOURCE_RESULT="$(latest_result)"
@@ -54,6 +48,7 @@ case "$MODE" in
     done < <(
       jq -r '
         (.testFailures // [])
+        | map(select(.targetName == "PeriodicTests"))
         | map(.targetName + "/" + (.testIdentifierString | sub("\\(\\)$"; "")))
         | unique[]
       ' <<< "$SUMMARY_JSON"
@@ -68,7 +63,7 @@ case "$MODE" in
     printf '  %s\n' "${TEST_FILTER[@]#-only-testing:}"
     ;;
   *)
-    echo "usage: $0 [unit|--ui|--all|--failed [result.xcresult]|--performance]" >&2
+    echo "usage: $0 [unit|--failed [result.xcresult]|--performance]" >&2
     exit 2
     ;;
 esac

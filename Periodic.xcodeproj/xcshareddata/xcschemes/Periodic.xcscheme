@@ -34,20 +34,6 @@
                ReferencedContainer = "container:Periodic.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
-         <BuildActionEntry
-            buildForTesting = "YES"
-            buildForRunning = "NO"
-            buildForProfiling = "NO"
-            buildForArchiving = "NO"
-            buildForAnalyzing = "YES">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "F65689D75FA2EFD924182645"
-               BuildableName = "PeriodicUITests.xctest"
-               BlueprintName = "PeriodicUITests"
-               ReferencedContainer = "container:Periodic.xcodeproj">
-            </BuildableReference>
-         </BuildActionEntry>
       </BuildActionEntries>
    </BuildAction>
    <TestAction
@@ -65,16 +51,6 @@
                BlueprintIdentifier = "87FB7CC519CCF464BF951BF8"
                BuildableName = "PeriodicTests.xctest"
                BlueprintName = "PeriodicTests"
-               ReferencedContainer = "container:Periodic.xcodeproj">
-            </BuildableReference>
-         </TestableReference>
-         <TestableReference
-            skipped = "NO">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "F65689D75FA2EFD924182645"
-               BuildableName = "PeriodicUITests.xctest"
-               BlueprintName = "PeriodicUITests"
                ReferencedContainer = "container:Periodic.xcodeproj">
             </BuildableReference>
          </TestableReference>

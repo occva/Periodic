@@ -39,6 +39,7 @@ struct SubscriptionPeriodEditingTests {
         let controller = PersistenceController()
         let container = try controller.makeContainer(
             schema: Schema([
+                SubscriptionSharingRecord.self,
                 SubscriptionRecord.self,
                 SubscriptionPeriodRecord.self,
                 SubscriptionPaymentRecord.self,
@@ -128,6 +129,7 @@ struct SubscriptionPeriodEditingTests {
         let controller = PersistenceController()
         let container = try controller.makeContainer(
             schema: Schema([
+                SubscriptionSharingRecord.self,
                 SubscriptionRecord.self,
                 SubscriptionPeriodRecord.self,
                 SubscriptionPaymentRecord.self,
@@ -200,6 +202,7 @@ struct SubscriptionPeriodEditingTests {
         let controller = PersistenceController()
         let container = try controller.makeContainer(
             schema: Schema([
+                SubscriptionSharingRecord.self,
                 SubscriptionRecord.self,
                 SubscriptionPeriodRecord.self,
                 SubscriptionPaymentRecord.self,

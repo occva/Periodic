@@ -20,6 +20,7 @@ struct SubscriptionEditorView: View {
     @State private var managementState = ManagementState.active
     @State private var billingKind = BillingKind.recurring
     @State private var billingCycle = BillingCycle.monthly
+    @State private var sharingDraft: SubscriptionSharingDraft
     @State private var amountText = ""
     @State private var currency: CurrencyCode
     @State private var hasStartDate = false
@@ -54,6 +55,9 @@ struct SubscriptionEditorView: View {
         self.preset = preset
         self.onSave = onSave
         let source = subscription ?? duplicate
+        _sharingDraft = State(initialValue: SubscriptionSharingDraft(
+            plan: duplicate?.sharing?.copyingMembers() ?? subscription?.sharing
+        ))
         _name = State(
             initialValue: duplicate.map { $0.name + AppLocalization.string(" 副本") }
                 ?? subscription?.name
@@ -175,28 +179,45 @@ struct SubscriptionEditorView: View {
                         }
                     }
 
-                    LabeledContent(billingKind == .recurring ? "周期价格" : "一次性价格") {
-                        HStack(spacing: 8) {
-                            TextField("金额", text: $amountText, prompt: Text("0.00"))
-                                .labelsHidden()
-                                .multilineTextAlignment(.trailing)
-                                .frame(width: 150)
-                                .accessibilityIdentifier("subscription-amount")
+                    Toggle("多人拼车", isOn: $sharingDraft.isEnabled)
+                        .accessibilityIdentifier("subscription-sharing-enabled")
 
-                            Picker("币种", selection: $currency) {
-                                ForEach(CurrencyPreferences.availableCurrencies(
-                                    from: selectedCurrenciesRaw,
-                                    including: currency
-                                )) { currency in
-                                    Text(currency.rawValue).tag(currency)
+                    if !sharingDraft.isEnabled {
+                        LabeledContent(AppLocalization.string(billingKind == .recurring ? "周期价格" : "一次性价格")) {
+                            HStack(spacing: 8) {
+                                TextField("金额", text: $amountText, prompt: Text("0.00"))
+                                    .labelsHidden()
+                                    .multilineTextAlignment(.trailing)
+                                    .monospacedDigit()
+                                    .frame(width: 150)
+                                    .accessibilityIdentifier("subscription-amount")
+                                Picker("币种", selection: $currency) {
+                                    ForEach(CurrencyPreferences.availableCurrencies(
+                                        from: selectedCurrenciesRaw,
+                                        including: currency
+                                    )) { currency in
+                                        Text(currency.rawValue).tag(currency)
+                                    }
                                 }
+                                .labelsHidden()
+                                .pickerStyle(.menu)
+                                .frame(width: 92)
+                                .accessibilityIdentifier("subscription-currency")
                             }
-                            .labelsHidden()
-                            .pickerStyle(.menu)
-                            .frame(width: 92)
-                            .accessibilityIdentifier("subscription-currency")
                         }
                     }
+                }
+
+                if sharingDraft.isEnabled {
+                    SubscriptionSharingEditorSection(
+                        draft: $sharingDraft,
+                        myAmountText: $amountText,
+                        currency: $currency,
+                        availableCurrencies: CurrencyPreferences.availableCurrencies(
+                            from: selectedCurrenciesRaw,
+                            including: currency
+                        )
+                    )
                 }
 
                 Section("有效期") {
@@ -220,7 +241,7 @@ struct SubscriptionEditorView: View {
                 Section("提醒与备注") {
                     if billingKind == .recurring {
                         Toggle("到期提醒", isOn: $reminderEnabled)
-                        Toggle("服务商自动续费", isOn: $automaticallyRenews)
+                        Toggle(AppLocalization.string(sharingDraft.isEnabled ? "拼车续期确认" : "服务商自动续费"), isOn: $automaticallyRenews)
                             .disabled(managementState != .active)
                             .accessibilityHint("到期日提醒确认，Periodic 不会自动扣款或延长周期")
 
@@ -367,8 +388,9 @@ struct SubscriptionEditorView: View {
 
     private var reminderExplanation: String {
         if automaticallyRenews {
-            return AppLocalization.string(
-                "服务商自动续费只在到期日提醒一次，避免与普通到期提醒重复。"
+            return AppLocalization.string(sharingDraft.isEnabled
+                ? "拼车续期只在到期日提醒确认，不会自动支付或延长周期。"
+                : "服务商自动续费只在到期日提醒一次，避免与普通到期提醒重复。"
             )
         }
         return AppLocalization.string(
@@ -503,6 +525,7 @@ struct SubscriptionEditorView: View {
             expiry: expiry,
             cycleMonths: billingKind == .recurring ? billingCycle.rawValue : nil,
             money: money,
+            sharing: try sharingDraft.plan(myMoney: money),
             note: note,
             reminderEnabled: billingKind == .recurring && reminderEnabled,
             reminderAdvanceDays: notificationSchedule.advanceDays,

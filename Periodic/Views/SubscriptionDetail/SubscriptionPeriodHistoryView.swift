@@ -4,6 +4,8 @@ struct SubscriptionPeriodHistoryView: View {
     @Environment(\.currencyDisplayStyle) private var currencyDisplayStyle
     @AppStorage(PreferenceKey.selectedCurrencies) private var selectedCurrenciesRaw = ""
 
+    @State private var sharingPeriod: SubscriptionPeriodDTO?
+
     let rows: [SubscriptionPeriodRow]
     @Binding var draft: SubscriptionPeriodDraft?
     let isLoading: Bool
@@ -27,6 +29,19 @@ struct SubscriptionPeriodHistoryView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             historyTable
+                .sheet(item: $sharingPeriod) { period in
+                    VStack {
+                        Text("本期拼车价格").font(.title2)
+                        Text(period.start.displayText + " – " + (period.end?.displayText ?? "—"))
+                        if let plan = period.sharing {
+                            SubscriptionSharingView(plan: plan, myMoney: period.money)
+                        }
+                        Button("关闭") { sharingPeriod = nil }
+                            .keyboardShortcut(.cancelAction)
+                    }
+                    .padding(20)
+                    .frame(width: 560, height: 540)
+                }
         }
     }
 
@@ -35,7 +50,7 @@ struct SubscriptionPeriodHistoryView: View {
             TableColumn("订阅次数") { row in
                 editableText("\(row.sequence)", row: row)
             }
-            .width(min: 70, ideal: 90)
+            .width(min: 50, ideal: 60)
 
             TableColumn("周期") { row in
                 if isEditing(row) {
@@ -48,7 +63,13 @@ struct SubscriptionPeriodHistoryView: View {
                     .pickerStyle(.menu)
                     .controlSize(.small)
                 } else {
-                    editableText(row.cycleTitle, row: row)
+                    VStack(alignment: .leading) {
+                        editableText(row.cycleTitle, row: row)
+                        if let period = row.period, period.sharing != nil {
+                            Button("拼车价格") { sharingPeriod = period }
+                                .buttonStyle(.link)
+                        }
+                    }
                 }
             }
             .width(min: 80, ideal: 100)
@@ -83,7 +104,7 @@ struct SubscriptionPeriodHistoryView: View {
             }
             .width(min: 120, ideal: 145)
 
-            TableColumn("金额") { row in
+            TableColumn("本期价格") { row in
                 if isEditing(row) {
                     moneyEditor
                 } else {
@@ -94,12 +115,12 @@ struct SubscriptionPeriodHistoryView: View {
                     .monospacedDigit()
                 }
             }
-            .width(min: 170, ideal: 190)
+            .width(min: 140, ideal: 170)
 
             TableColumn("操作") { row in
                 actions(for: row)
             }
-            .width(min: 64, ideal: 72, max: 80)
+            .width(min: 110, ideal: 120)
         }
     }
 
@@ -140,13 +161,13 @@ struct SubscriptionPeriodHistoryView: View {
         if isEditing(row) {
             HStack(spacing: 6) {
                 Button("保存", action: onSave)
-                .buttonStyle(.plain)
+                .buttonStyle(.borderless)
                 .keyboardShortcut(.return, modifiers: .command)
                 .disabled(isSaving)
                 .help("保存修改")
 
                 Button("取消", action: onCancel)
-                .buttonStyle(.plain)
+                .buttonStyle(.borderless)
                 .disabled(isSaving)
                 .help("取消修改")
             }
@@ -155,13 +176,13 @@ struct SubscriptionPeriodHistoryView: View {
                 Button("编辑") {
                     onEdit(period)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.borderless)
                 .help("编辑周期记录")
 
                 Button("删除", role: .destructive) {
                     onDelete(period)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.borderless)
                 .help("删除周期记录")
             }
             .disabled(draft != nil || isDeleting)

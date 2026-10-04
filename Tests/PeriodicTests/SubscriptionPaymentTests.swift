@@ -462,6 +462,7 @@ struct SubscriptionPaymentTests {
     private func makeStore() throws -> SubscriptionStore {
         let container = try PersistenceController().makeContainer(
             schema: Schema([
+                SubscriptionSharingRecord.self,
                 SubscriptionRecord.self,
                 SubscriptionPeriodRecord.self,
                 SubscriptionPaymentRecord.self,

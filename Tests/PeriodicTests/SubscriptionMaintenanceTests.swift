@@ -197,12 +197,12 @@ struct SubscriptionMaintenanceTests {
     }
 
     @Test func appSchemaHasExplicitVersionsAndMigration() {
-        let schema = Schema(versionedSchema: AppSchemaV5.self)
+        let schema = Schema(versionedSchema: AppSchemaV6.self)
 
-        #expect(schema.version == Schema.Version(5, 0, 0))
-        #expect(schema.entities.count == AppSchemaV5.models.count)
-        #expect(AppSchemaMigrationPlan.schemas.count == 5)
-        #expect(AppSchemaMigrationPlan.stages.count == 4)
+        #expect(schema.version == Schema.Version(6, 0, 0))
+        #expect(schema.entities.count == AppSchemaV6.models.count)
+        #expect(AppSchemaMigrationPlan.schemas.count == 6)
+        #expect(AppSchemaMigrationPlan.stages.count == 5)
     }
 
     @MainActor
@@ -229,7 +229,7 @@ struct SubscriptionMaintenanceTests {
             try context.save()
         }
 
-        let versionedSchema = Schema(versionedSchema: AppSchemaV5.self)
+        let versionedSchema = Schema(versionedSchema: AppSchemaV6.self)
         let reopenedContainer = try PersistenceController(storeURL: storeURL).makeContainer(
             schema: versionedSchema,
             migrationPlan: AppSchemaMigrationPlan.self
@@ -278,7 +278,7 @@ struct SubscriptionMaintenanceTests {
         }
 
         let container = try PersistenceController(storeURL: storeURL).makeContainer(
-            schema: Schema(versionedSchema: AppSchemaV5.self),
+            schema: Schema(versionedSchema: AppSchemaV6.self),
             migrationPlan: AppSchemaMigrationPlan.self
         )
         let context = ModelContext(container)
@@ -340,7 +340,7 @@ struct SubscriptionMaintenanceTests {
         }
 
         let container = try PersistenceController(storeURL: storeURL).makeContainer(
-            schema: Schema(versionedSchema: AppSchemaV5.self),
+            schema: Schema(versionedSchema: AppSchemaV6.self),
             migrationPlan: AppSchemaMigrationPlan.self
         )
         let context = ModelContext(container)
@@ -614,6 +614,7 @@ struct SubscriptionMaintenanceTests {
     private func makeStore() throws -> SubscriptionStore {
         let container = try PersistenceController().makeContainer(
             schema: Schema([
+                SubscriptionSharingRecord.self,
                 SubscriptionRecord.self,
                 SubscriptionPeriodRecord.self,
                 SubscriptionPaymentRecord.self,

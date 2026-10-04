@@ -13,6 +13,7 @@ struct SubscriptionDTO: Identifiable, Hashable, Sendable {
     let expiry: LocalDate?
     let cycleMonths: Int?
     let money: Money
+    let sharing: SubscriptionSharingPlan?
     let note: String
     let reminderEnabled: Bool
     let reminderAdvanceDays: [Int]
@@ -35,6 +36,7 @@ struct SubscriptionDTO: Identifiable, Hashable, Sendable {
         expiry: LocalDate?,
         cycleMonths: Int?,
         money: Money,
+        sharing: SubscriptionSharingPlan? = nil,
         note: String,
         reminderEnabled: Bool,
         reminderAdvanceDays: [Int] = SubscriptionNotificationSchedule.defaultAdvanceDays,
@@ -56,6 +58,7 @@ struct SubscriptionDTO: Identifiable, Hashable, Sendable {
         self.expiry = expiry
         self.cycleMonths = cycleMonths
         self.money = money
+        self.sharing = sharing
         self.note = note
         self.reminderEnabled = reminderEnabled
         self.reminderAdvanceDays = SubscriptionNotificationSchedule.normalizedAdvanceDays(
@@ -79,6 +82,7 @@ struct SubscriptionPeriodDTO: Identifiable, Hashable, Sendable {
     let start: LocalDate
     let end: LocalDate?
     let money: Money
+    let sharing: SubscriptionSharingPlan?
     let source: SubscriptionPeriodSource
     let createdAt: Date
 
@@ -90,6 +94,7 @@ struct SubscriptionPeriodDTO: Identifiable, Hashable, Sendable {
         start: LocalDate,
         end: LocalDate?,
         money: Money,
+        sharing: SubscriptionSharingPlan? = nil,
         source: SubscriptionPeriodSource = .manual,
         createdAt: Date
     ) {
@@ -100,6 +105,7 @@ struct SubscriptionPeriodDTO: Identifiable, Hashable, Sendable {
         self.start = start
         self.end = end
         self.money = money
+        self.sharing = sharing
         self.source = source
         self.createdAt = createdAt
     }
@@ -120,6 +126,7 @@ struct SubscriptionPeriodCreateInput: Sendable {
     let start: LocalDate
     let end: LocalDate?
     let money: Money
+    let sharing: SubscriptionSharingPlan?
     let source: SubscriptionPeriodSource
 
     init(
@@ -130,6 +137,7 @@ struct SubscriptionPeriodCreateInput: Sendable {
         start: LocalDate,
         end: LocalDate?,
         money: Money,
+        sharing: SubscriptionSharingPlan? = nil,
         source: SubscriptionPeriodSource = .manual
     ) {
         self.id = id
@@ -139,6 +147,7 @@ struct SubscriptionPeriodCreateInput: Sendable {
         self.start = start
         self.end = end
         self.money = money
+        self.sharing = sharing
         self.source = source
     }
 }
@@ -156,6 +165,32 @@ struct SubscriptionPeriodUpdateInput: Sendable {
     let start: LocalDate
     let end: LocalDate?
     let money: Money
+    let sharingUpdate: SubscriptionPeriodSharingUpdate
+
+    init(
+        original: SubscriptionPeriodDTO,
+        expectedSubscriptionRevision: Int64,
+        billingKind: BillingKind,
+        cycleMonths: Int?,
+        start: LocalDate,
+        end: LocalDate?,
+        money: Money,
+        sharingUpdate: SubscriptionPeriodSharingUpdate = .preserve
+    ) {
+        self.original = original
+        self.expectedSubscriptionRevision = expectedSubscriptionRevision
+        self.billingKind = billingKind
+        self.cycleMonths = cycleMonths
+        self.start = start
+        self.end = end
+        self.money = money
+        self.sharingUpdate = sharingUpdate
+    }
+}
+
+enum SubscriptionPeriodSharingUpdate: Sendable {
+    case preserve
+    case replace(SubscriptionSharingPlan)
 }
 
 struct SubscriptionPeriodDeleteInput: Sendable {
@@ -181,6 +216,7 @@ struct SubscriptionCreateInput: Sendable {
     let expiry: LocalDate?
     let cycleMonths: Int?
     let money: Money
+    let sharing: SubscriptionSharingPlan?
     let note: String
     let reminderEnabled: Bool
     let reminderAdvanceDays: [Int]
@@ -200,6 +236,7 @@ struct SubscriptionCreateInput: Sendable {
         expiry: LocalDate?,
         cycleMonths: Int?,
         money: Money,
+        sharing: SubscriptionSharingPlan? = nil,
         note: String,
         reminderEnabled: Bool,
         reminderAdvanceDays: [Int] = SubscriptionNotificationSchedule.defaultAdvanceDays,
@@ -218,6 +255,7 @@ struct SubscriptionCreateInput: Sendable {
         self.expiry = expiry
         self.cycleMonths = cycleMonths
         self.money = money
+        self.sharing = sharing
         self.note = note
         self.reminderEnabled = reminderEnabled
         self.reminderAdvanceDays = SubscriptionNotificationSchedule.normalizedAdvanceDays(

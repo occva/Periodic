@@ -62,6 +62,7 @@ struct SubscriptionPeriodDraft {
     var endDate: Date
     var amountText: String
     var currency: CurrencyCode
+    let sharing: SubscriptionSharingPlan?
 
     var isCreating: Bool { original == nil }
 
@@ -73,6 +74,7 @@ struct SubscriptionPeriodDraft {
         endDate = period.end?.date() ?? period.start.date()
         amountText = period.money.inputText
         currency = period.money.currency
+        sharing = period.sharing
     }
 
     init(subscription: SubscriptionDTO) {
@@ -89,6 +91,7 @@ struct SubscriptionPeriodDraft {
             : subscription.expiry?.date() ?? defaultStart
         amountText = subscription.money.inputText
         currency = subscription.money.currency
+        sharing = subscription.sharing
     }
 
     func addInput(
@@ -105,7 +108,8 @@ struct SubscriptionPeriodDraft {
                 cycleMonths: kind.cycleMonths,
                 start: values.start,
                 end: values.end,
-                money: values.money
+                money: values.money,
+                sharing: sharing
             ),
             expectedSubscriptionRevision: expectedSubscriptionRevision
         )

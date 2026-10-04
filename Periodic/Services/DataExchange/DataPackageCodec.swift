@@ -109,6 +109,9 @@ enum DataPackageCodec {
               (1...DataPackageManifest.currentVersion).contains(manifest.formatVersion) else {
             throw DataExchangeError.unsupportedVersion(manifest.formatVersion)
         }
+        if manifest.formatVersion >= 5, manifest.minimumReaderVersion < 5 {
+            throw DataExchangeError.invalidPackage("拼车数据包的最低读取版本必须为 5")
+        }
         if manifest.formatVersion >= 2,
            (files["data/payments.jsonl"] == nil || manifest.tables.payments == nil) {
             throw DataExchangeError.invalidPackage("数据包缺少消费记录")
@@ -131,6 +134,11 @@ enum DataPackageCodec {
                 try jsonDecoder().decode(DataPackageSettings.self, from: $0)
             }
         )
+        if manifest.formatVersion < 5,
+           snapshot.subscriptions.contains(where: { $0.sharing != nil })
+            || snapshot.periods.contains(where: { $0.sharing != nil }) {
+            throw DataExchangeError.invalidPackage("拼车数据需要 V5 数据包")
+        }
         try validate(snapshot)
         guard manifest.includesSettings == (snapshot.settings != nil) else {
             throw DataExchangeError.invalidPackage("设置声明与数据不一致")
@@ -228,6 +236,7 @@ enum DataPackageCodec {
             throw DataExchangeError.invalidRecord("模板引用了包外自定义分类")
         }
         for value in snapshot.subscriptions {
+            try value.sharing?.validate(myMoney: Money(minorUnits: value.amountMinor, currency: value.currency))
             guard value.recordVersion == 1,
                   value.currency.scale == value.currencyScale,
                   value.amountMinor >= 0,
@@ -266,6 +275,7 @@ enum DataPackageCodec {
             }
         }
         for value in snapshot.periods {
+            try value.sharing?.validate(myMoney: Money(minorUnits: value.amountMinor, currency: value.currency))
             guard value.recordVersion == 1,
                   value.currency.scale == value.currencyScale,
                   value.amountMinor >= 0,

@@ -4,7 +4,12 @@ import SwiftData
 
 @ModelActor
 actor DataExchangeStore {
+    private var sharingPersistence: SubscriptionSharingPersistence {
+        SubscriptionSharingPersistence(context: modelContext)
+    }
+
     func snapshot() throws -> DataPackageSnapshot {
+        let sharingPlans = try sharingPersistence.plansByOwnerKey()
         let paymentAttachmentReferences = try paymentAttachmentReferencesByPaymentID()
         let subscriptions = try modelContext.fetch(FetchDescriptor<SubscriptionRecord>())
             .map { record in
@@ -33,7 +38,8 @@ actor DataExchangeStore {
                     automaticallyRenews: record.automaticallyRenews,
                     revision: record.revision,
                     createdAt: record.createdAt,
-                    updatedAt: record.updatedAt
+                    updatedAt: record.updatedAt,
+                    sharing: sharingPlans[SubscriptionSharingRecord.key(subscriptionID: record.id)]
                 )
             }
             .sorted { $0.id.uuidString < $1.id.uuidString }
@@ -52,7 +58,8 @@ actor DataExchangeStore {
                     currency: try currency(record.currencyCode, scale: record.currencyScale),
                     currencyScale: record.currencyScale,
                     source: try value(SubscriptionPeriodSource.self, raw: record.sourceRaw, field: "period.source"),
-                    createdAt: record.createdAt
+                    createdAt: record.createdAt,
+                    sharing: sharingPlans[SubscriptionSharingRecord.key(subscriptionID: record.subscriptionID, periodID: record.id)]
                 )
             }
             .sorted {
@@ -195,6 +202,12 @@ actor DataExchangeStore {
         expectedDigest: String,
         conflictResolution: DataImportConflictResolution
     ) throws -> DataImportReceipt {
+        for value in imported.subscriptions {
+            try value.sharing?.validate(myMoney: Money(minorUnits: value.amountMinor, currency: value.currency))
+        }
+        for value in imported.periods {
+            try value.sharing?.validate(myMoney: Money(minorUnits: value.amountMinor, currency: value.currency))
+        }
         guard try digest() == expectedDigest else { throw DataExchangeError.stalePlan }
         do {
             let local = try snapshot()
@@ -237,14 +250,14 @@ actor DataExchangeStore {
                     if localSubscriptionsByID[incoming.id] == incoming {
                         skipped += 1
                     } else if conflictResolution == .useImported {
-                        apply(incoming, to: record)
+                        try apply(incoming, to: record)
                         updatedSubscriptionIDs.insert(record.id)
                         updated += 1
                     } else {
                         skipped += 1
                     }
                 } else {
-                    modelContext.insert(makeSubscription(incoming))
+                    modelContext.insert(try makeSubscription(incoming))
                     added += 1
                 }
             }
@@ -262,14 +275,14 @@ actor DataExchangeStore {
                         skipped += 1
                     } else if conflictResolution == .useImported {
                         changedHistorySubscriptionIDs.insert(record.subscriptionID)
-                        apply(incoming, to: record)
+                        try apply(incoming, to: record)
                         changedHistorySubscriptionIDs.insert(incoming.subscriptionID)
                         updated += 1
                     } else {
                         skipped += 1
                     }
                 } else {
-                    modelContext.insert(makePeriod(incoming))
+                    modelContext.insert(try makePeriod(incoming))
                     changedHistorySubscriptionIDs.insert(incoming.subscriptionID)
                     added += 1
                 }
@@ -404,16 +417,21 @@ actor DataExchangeStore {
         return .init(additions: additions, conflicts: conflicts, unchanged: unchanged)
     }
 
-    private func makeSubscription(_ value: DataPackageSubscription) -> SubscriptionRecord {
+    private func makeSubscription(_ value: DataPackageSubscription) throws -> SubscriptionRecord {
         let record = SubscriptionRecord(input: subscriptionInput(value), now: value.createdAt)
-        apply(value, to: record)
+        try apply(value, to: record)
         record.revision = 1
         record.createdAt = value.createdAt
         record.updatedAt = value.updatedAt
         return record
     }
 
-    private func apply(_ value: DataPackageSubscription, to record: SubscriptionRecord) {
+    private func apply(_ value: DataPackageSubscription, to record: SubscriptionRecord) throws {
+        try sharingPersistence.set(
+            value.sharing,
+            subscriptionID: value.id,
+            myMoney: Money(minorUnits: value.amountMinor, currency: value.currency)
+        )
         record.name = value.name
         record.symbolName = value.symbolName
         record.iconResourceName = value.iconResourceName
@@ -456,6 +474,7 @@ actor DataExchangeStore {
             expiry: value.expiry,
             cycleMonths: value.cycleMonths,
             money: Money(minorUnits: value.amountMinor, currency: value.currency),
+            sharing: value.sharing,
             note: value.note,
             reminderEnabled: value.reminderEnabled,
             reminderAdvanceDays: value.reminderAdvanceDays
@@ -466,8 +485,12 @@ actor DataExchangeStore {
         )
     }
 
-    private func makePeriod(_ value: DataPackagePeriod) -> SubscriptionPeriodRecord {
-        SubscriptionPeriodRecord(
+    private func makePeriod(_ value: DataPackagePeriod) throws -> SubscriptionPeriodRecord {
+        try sharingPersistence.set(
+            value.sharing, subscriptionID: value.subscriptionID, periodID: value.id,
+            myMoney: Money(minorUnits: value.amountMinor, currency: value.currency)
+        )
+        return SubscriptionPeriodRecord(
             input: SubscriptionPeriodCreateInput(
                 id: value.id,
                 subscriptionID: value.subscriptionID,
@@ -482,7 +505,11 @@ actor DataExchangeStore {
         )
     }
 
-    private func apply(_ value: DataPackagePeriod, to record: SubscriptionPeriodRecord) {
+    private func apply(_ value: DataPackagePeriod, to record: SubscriptionPeriodRecord) throws {
+        try sharingPersistence.set(
+            value.sharing, subscriptionID: value.subscriptionID, periodID: value.id,
+            myMoney: Money(minorUnits: value.amountMinor, currency: value.currency)
+        )
         record.subscriptionID = value.subscriptionID
         record.billingKindRaw = value.billingKind.rawValue
         record.cycleMonths = value.cycleMonths

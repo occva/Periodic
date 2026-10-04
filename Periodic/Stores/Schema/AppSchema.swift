@@ -269,6 +269,14 @@ enum AppSchemaV5: VersionedSchema {
     }
 }
 
+enum AppSchemaV6: VersionedSchema {
+    static var versionIdentifier: Schema.Version { Schema.Version(6, 0, 0) }
+
+    static var models: [any PersistentModel.Type] {
+        AppSchemaV5.models + [SubscriptionSharingRecord.self]
+    }
+}
+
 enum AppSchemaMigrationPlan: SchemaMigrationPlan {
     static var schemas: [any VersionedSchema.Type] {
         [
@@ -277,6 +285,7 @@ enum AppSchemaMigrationPlan: SchemaMigrationPlan {
             AppSchemaV3.self,
             AppSchemaV4.self,
             AppSchemaV5.self,
+            AppSchemaV6.self,
         ]
     }
 
@@ -291,6 +300,7 @@ enum AppSchemaMigrationPlan: SchemaMigrationPlan {
                 willMigrate: nil,
                 didMigrate: migratePaymentAttachmentsToOrderedItems
             ),
+            .lightweight(fromVersion: AppSchemaV5.self, toVersion: AppSchemaV6.self),
         ]
     }
 

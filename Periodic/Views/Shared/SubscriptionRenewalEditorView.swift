@@ -28,8 +28,8 @@ struct SubscriptionRenewalEditorView: View {
         _cycle = State(
             initialValue: BillingCycle(rawValue: preview.cycleMonths) ?? .monthly
         )
-        _amountText = State(initialValue: preview.money.inputText)
-        _currency = State(initialValue: preview.money.currency)
+        _amountText = State(initialValue: preview.defaultPaymentMoney.inputText)
+        _currency = State(initialValue: preview.defaultPaymentMoney.currency)
     }
 
     var body: some View {
@@ -47,6 +47,14 @@ struct SubscriptionRenewalEditorView: View {
                 LabeledContent("本期价格") {
                     Text(quotedMoney.displayText(style: currencyDisplayStyle))
                         .monospacedDigit()
+                }
+
+                if let plan = preview.sharing {
+                    Text(plan.summary)
+                    Text(AppLocalization.string(plan.role == .organizer
+                        ? "个人价格与订阅总价分别记录；实际支付不会自动更改当前拼车价格。"
+                        : "实际支付不会自动更改我的价格。"))
+                        .foregroundStyle(.secondary)
                 }
 
                 DatePicker(
@@ -107,6 +115,18 @@ struct SubscriptionRenewalEditorView: View {
         .frame(width: 500)
         .presentationSizing(.fitted)
         .errorAlert($error)
+        .onChange(of: cycle) { oldCycle, newCycle in
+            let oldDefault = preview.defaultPaymentMoney.prorated(
+                from: preview.cycleMonths, to: oldCycle.rawValue
+            )
+            if amountText == oldDefault?.inputText,
+               currency == preview.defaultPaymentMoney.currency,
+               let money = preview.defaultPaymentMoney.prorated(
+                from: preview.cycleMonths, to: newCycle.rawValue
+            ) {
+                amountText = money.inputText
+            }
+        }
     }
 
     private var periodDescription: String {

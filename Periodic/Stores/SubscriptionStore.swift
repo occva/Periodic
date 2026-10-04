@@ -3,7 +3,7 @@ import SwiftData
 
 @ModelActor
 actor SubscriptionStore {
-    enum StoreError: LocalizedError {
+    enum StoreError: LocalizedError, Equatable {
         case invalidStoredValue(String)
         case notFound
         case periodNotFound
@@ -29,16 +29,21 @@ actor SubscriptionStore {
         }
     }
 
+    private var sharingPersistence: SubscriptionSharingPersistence {
+        SubscriptionSharingPersistence(context: modelContext)
+    }
+
     func fetchAll() throws -> [SubscriptionDTO] {
         let descriptor = FetchDescriptor<SubscriptionRecord>(
             sortBy: [SortDescriptor(\.createdAt, order: .forward)]
         )
         let records = try modelContext.fetch(descriptor)
+        let sharingPlans = try sharingPersistence.plansByOwnerKey(in: .currentSubscriptions)
         var subscriptions: [SubscriptionDTO] = []
         var firstConversionError: (any Error)?
         for record in records {
             do {
-                subscriptions.append(try makeDTO(record))
+                subscriptions.append(try makeDTO(record, sharingPlans: sharingPlans))
             } catch {
                 firstConversionError = firstConversionError ?? error
             }
@@ -57,10 +62,11 @@ actor SubscriptionStore {
         historyPolicy: SubscriptionCreationHistoryPolicy = .recordInitialPeriod
     ) throws -> UUID {
         try commit {
+            try sharingPersistence.set(input.sharing, subscriptionID: input.id, myMoney: input.money)
             modelContext.insert(SubscriptionRecord(input: input))
             if historyPolicy == .recordInitialPeriod,
                let period = initialPeriod(for: input) {
-                modelContext.insert(SubscriptionPeriodRecord(input: period))
+                try insertPeriod(period)
             }
             return input.id
         }
@@ -72,13 +78,14 @@ actor SubscriptionStore {
     ) throws {
         try commit {
             for input in inputs {
+                try sharingPersistence.set(input.sharing, subscriptionID: input.id, myMoney: input.money)
                 modelContext.insert(SubscriptionRecord(input: input))
                 if let period = initialPeriod(for: input) {
-                    modelContext.insert(SubscriptionPeriodRecord(input: period))
+                    try insertPeriod(period)
                 }
             }
             for period in additionalPeriods {
-                modelContext.insert(SubscriptionPeriodRecord(input: period))
+                try insertPeriod(period)
             }
         }
     }
@@ -92,11 +99,12 @@ actor SubscriptionStore {
             ]
         )
         let records = try modelContext.fetch(descriptor)
+        let sharingPlans = try sharingPersistence.plansByOwnerKey(in: .subscription(subscriptionID))
         var periods: [SubscriptionPeriodDTO] = []
         var firstConversionError: (any Error)?
         for record in records {
             do {
-                periods.append(try makePeriodDTO(record))
+                periods.append(try makePeriodDTO(record, sharingPlans: sharingPlans))
             } catch {
                 firstConversionError = firstConversionError ?? error
             }
@@ -187,8 +195,9 @@ actor SubscriptionStore {
                 guard let period = initialPeriod(for: input, source: .manual) else {
                     throw StoreError.incompletePeriodDates
                 }
-                modelContext.insert(SubscriptionPeriodRecord(input: period))
+                try insertPeriod(period)
             }
+            try sharingPersistence.set(input.sharing, subscriptionID: input.id, myMoney: input.money)
             record.apply(input)
         }
     }
@@ -199,7 +208,7 @@ actor SubscriptionStore {
                 id: input.period.subscriptionID,
                 expectedRevision: input.expectedSubscriptionRevision
             )
-            modelContext.insert(SubscriptionPeriodRecord(input: input.period))
+            try insertPeriod(input.period)
             subscription.markHistoryChanged()
         }
     }
@@ -211,6 +220,20 @@ actor SubscriptionStore {
                 expectedRevision: input.expectedSubscriptionRevision
             )
             let period = try period(matching: input.original)
+            let sharing: SubscriptionSharingPlan?
+            switch input.sharingUpdate {
+            case .preserve:
+                sharing = input.original.sharing
+            case .replace(let plan):
+                sharing = plan
+            }
+            try sharing?.validate(myMoney: input.money)
+            try sharingPersistence.set(
+                sharing,
+                subscriptionID: period.subscriptionID,
+                periodID: period.id,
+                myMoney: input.money
+            )
             period.apply(input)
             subscription.markHistoryChanged()
         }
@@ -234,6 +257,7 @@ actor SubscriptionStore {
                 payment.revision += 1
                 payment.updatedAt = .now
             }
+            try sharingPersistence.set(nil, subscriptionID: period.subscriptionID, periodID: period.id, myMoney: input.original.money)
             modelContext.delete(period)
             subscription.markHistoryChanged()
         }
@@ -370,6 +394,7 @@ actor SubscriptionStore {
             for attachment in paymentAttachments { modelContext.delete(attachment) }
             for attachment in legacyPaymentAttachments { modelContext.delete(attachment) }
             for payment in payments { modelContext.delete(payment) }
+            try sharingPersistence.delete(subscriptionIDs: targetIDs)
             for period in periods { modelContext.delete(period) }
             for target in targets { modelContext.delete(target) }
 
@@ -452,18 +477,17 @@ actor SubscriptionStore {
                 throw StoreError.invalidPaymentAmount
             }
             let periodID = UUID()
-            modelContext.insert(
-                SubscriptionPeriodRecord(
-                    input: SubscriptionPeriodCreateInput(
-                        id: periodID,
-                        subscriptionID: record.id,
-                        billingKind: .recurring,
-                        cycleMonths: preview.cycleMonths,
-                        start: preview.nextStart,
-                        end: preview.nextExpiry,
-                        money: preview.money,
-                        source: .renewal
-                    )
+            try insertPeriod(
+                SubscriptionPeriodCreateInput(
+                    id: periodID,
+                    subscriptionID: record.id,
+                    billingKind: .recurring,
+                    cycleMonths: preview.cycleMonths,
+                    start: preview.nextStart,
+                    end: preview.nextExpiry,
+                    money: preview.money,
+                    sharing: preview.sharing,
+                    source: .renewal
                 )
             )
             let payment = SubscriptionPaymentCreateInput(
@@ -551,7 +575,7 @@ actor SubscriptionStore {
                     ),
                     source: .initial
                 )
-                modelContext.insert(SubscriptionPeriodRecord(input: period))
+                try insertPeriod(period)
                 subscriptionIDsWithLifetimePeriod.insert(subscription.id)
                 changedCount += 1
             }
@@ -687,7 +711,17 @@ actor SubscriptionStore {
         }
     }
 
-    private func makeDTO(_ record: SubscriptionRecord) throws -> SubscriptionDTO {
+    private func makeDTO(
+        _ record: SubscriptionRecord,
+        sharingPlans: [String: SubscriptionSharingPlan]? = nil
+    ) throws -> SubscriptionDTO {
+        let sharing: SubscriptionSharingPlan?
+        if let sharingPlans {
+            sharing = sharingPlans[SubscriptionSharingRecord.key(subscriptionID: record.id)]
+        } else {
+            sharing = try sharingPersistence.plan(subscriptionID: record.id)
+        }
+
         guard let category = ServiceCategory(rawValue: record.categoryRaw) else {
             throw StoreError.invalidStoredValue("categoryRaw")
         }
@@ -702,6 +736,7 @@ actor SubscriptionStore {
             throw StoreError.invalidStoredValue("currencyCode")
         }
 
+        try sharing?.validate(myMoney: Money(minorUnits: record.periodAmountMinor, currency: currency))
         return SubscriptionDTO(
             id: record.id,
             name: record.name,
@@ -715,6 +750,7 @@ actor SubscriptionStore {
             expiry: record.expiryDay.map(LocalDate.init(dayNumber:)),
             cycleMonths: record.cycleMonths,
             money: Money(minorUnits: record.periodAmountMinor, currency: currency),
+            sharing: sharing,
             note: record.note,
             reminderEnabled: record.reminderEnabled,
             reminderAdvanceDays: SubscriptionNotificationSchedule.advanceDays(
@@ -728,7 +764,18 @@ actor SubscriptionStore {
         )
     }
 
-    private func makePeriodDTO(_ record: SubscriptionPeriodRecord) throws -> SubscriptionPeriodDTO {
+    private func makePeriodDTO(
+        _ record: SubscriptionPeriodRecord,
+        sharingPlans: [String: SubscriptionSharingPlan]? = nil
+    ) throws -> SubscriptionPeriodDTO {
+        let sharing: SubscriptionSharingPlan?
+        if let sharingPlans {
+            let key = SubscriptionSharingRecord.key(subscriptionID: record.subscriptionID, periodID: record.id)
+            sharing = sharingPlans[key]
+        } else {
+            sharing = try sharingPersistence.plan(subscriptionID: record.subscriptionID, periodID: record.id)
+        }
+
         guard let billingKind = BillingKind(rawValue: record.billingKindRaw) else {
             throw StoreError.invalidStoredValue("period.billingKindRaw")
         }
@@ -739,6 +786,7 @@ actor SubscriptionStore {
         guard let source = SubscriptionPeriodSource(rawValue: record.sourceRaw) else {
             throw StoreError.invalidStoredValue("period.sourceRaw")
         }
+        try sharing?.validate(myMoney: Money(minorUnits: record.amountMinor, currency: currency))
         return SubscriptionPeriodDTO(
             id: record.id,
             subscriptionID: record.subscriptionID,
@@ -747,6 +795,7 @@ actor SubscriptionStore {
             start: LocalDate(dayNumber: record.startDay),
             end: record.endDay.map(LocalDate.init(dayNumber:)),
             money: Money(minorUnits: record.amountMinor, currency: currency),
+            sharing: sharing,
             source: source,
             createdAt: record.createdAt
         )
@@ -853,6 +902,16 @@ actor SubscriptionStore {
         }
     }
 
+    private func insertPeriod(_ input: SubscriptionPeriodCreateInput) throws {
+        try sharingPersistence.set(
+            input.sharing,
+            subscriptionID: input.subscriptionID,
+            periodID: input.id,
+            myMoney: input.money
+        )
+        modelContext.insert(SubscriptionPeriodRecord(input: input))
+    }
+
     private func initialPeriod(
         for input: SubscriptionCreateInput,
         fallbackStart: LocalDate = .today,
@@ -869,6 +928,7 @@ actor SubscriptionStore {
                 start: start,
                 end: expiry,
                 money: input.money,
+                sharing: input.sharing,
                 source: source
             )
         case .lifetime:
@@ -880,6 +940,7 @@ actor SubscriptionStore {
                 start: input.periodStart ?? fallbackStart,
                 end: .defaultLifetimeHistoryEnd,
                 money: input.money,
+                sharing: input.sharing,
                 source: source
             )
         }
@@ -906,6 +967,6 @@ actor SubscriptionStore {
             fallbackStart: fallbackStart,
             source: .manual
         ) else { return }
-        modelContext.insert(SubscriptionPeriodRecord(input: period))
+        try insertPeriod(period)
     }
 }

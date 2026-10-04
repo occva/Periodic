@@ -69,7 +69,7 @@ final class AppServices {
             builtinTemplateError = PresentedError(error, title: "无法读取内置模板")
         }
         do {
-            let schema = Schema(versionedSchema: AppSchemaV5.self)
+            let schema = Schema(versionedSchema: AppSchemaV6.self)
             let container = try persistence.makeContainer(
                 schema: schema,
                 migrationPlan: AppSchemaMigrationPlan.self,

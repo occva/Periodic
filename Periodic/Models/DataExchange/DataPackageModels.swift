@@ -2,7 +2,7 @@ import Foundation
 
 struct DataPackageManifest: Codable, Equatable, Sendable {
     static let currentFormat = "periodic-data-package"
-    static let currentVersion = 4
+    static let currentVersion = 5
 
     let format: String
     let formatVersion: Int
@@ -269,9 +269,11 @@ struct DataPackageSubscription: Codable, Equatable, Sendable, Identifiable {
     let revision: Int64
     let createdAt: Date
     let updatedAt: Date
+    var sharing: SubscriptionSharingPlan? = nil
 
     static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.id == rhs.id
+        lhs.sharing == rhs.sharing
+            && lhs.id == rhs.id
             && lhs.name == rhs.name
             && lhs.symbolName == rhs.symbolName
             && lhs.iconResourceName == rhs.iconResourceName
@@ -316,9 +318,11 @@ struct DataPackagePeriod: Codable, Equatable, Sendable, Identifiable {
     let currencyScale: Int
     let source: SubscriptionPeriodSource
     let createdAt: Date
+    var sharing: SubscriptionSharingPlan? = nil
 
     static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.id == rhs.id
+        lhs.sharing == rhs.sharing
+            && lhs.id == rhs.id
             && lhs.subscriptionID == rhs.subscriptionID
             && lhs.billingKind == rhs.billingKind
             && lhs.cycleMonths == rhs.cycleMonths

@@ -100,15 +100,11 @@ Periodic 使用 Swift 6 严格并发检查，界面基于 SwiftUI 和 macOS 26 L
 # 单元测试（默认跳过独立性能测试）
 ./script/test.sh unit
 
-# UI 测试
-./script/test.sh --ui
-
-# 完整常规测试
-./script/test.sh --all
-
 # 独立性能基线测试
 ./script/test.sh --performance
 ```
+
+项目禁止 UI 测试代码与 target，只通过单元测试、性能测试及构建检查验证。
 
 更多工程说明：
 

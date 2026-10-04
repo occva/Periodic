@@ -18,7 +18,7 @@ struct SubscriptionPaymentDraft: Identifiable, Equatable {
         id = UUID()
         original = nil
         paymentDate = Date()
-        amountText = subscription.money.inputText
+        amountText = (subscription.sharing?.defaultPaymentMoney(myMoney: subscription.money) ?? subscription.money).inputText
         currency = subscription.money.currency
         periodRecordID = nil
         periodStart = nil

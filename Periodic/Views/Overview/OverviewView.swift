@@ -98,7 +98,12 @@ struct OverviewView: View {
                                 fallbackSeed: item.name,
                                 size: 22
                             )
-                            Text(item.name)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(item.name)
+                                if let sharing = item.sharing {
+                                    Text(sharing.summary).font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .contentShape(Rectangle())

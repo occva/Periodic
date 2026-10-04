@@ -24,7 +24,7 @@ Stores ─────────────→ Models、Schema
 - `Support/`：环境值、ViewModifier、日志、配置和小型平台胶水。
 - `Views/`：按功能分目录；页面根视图、专用组件、布局和草稿类型就近放置。
 - `Resources/`：本地化、Asset Catalog、内置目录和图标资源。
-- `Tests/`：单元测试与 UI 测试，目录名称与被测职责对应。
+- `Tests/`：单元测试，目录名称与被测职责对应。
 
 ## 文件组织约定
 
@@ -58,5 +58,6 @@ Stores ─────────────→ Models、Schema
 - [菜单栏订阅速览](extensions/4-菜单栏订阅速览规格.md)
 - [试用、取消计划与续费意图](extensions/5-试用取消计划与续费意图规格.md)
 - [变更记录与安全撤销](extensions/6-变更记录与安全撤销规格.md)
+- [拼车订阅](extensions/7-拼车订阅规格.md)
 
 扩展必须通过 Adapter 和 Service 接入，不能让文件格式、CloudKit 或 Provider SDK 反向渗透到 Domain、Store 或具体页面。未启用网络扩展时，应用保持现有本地行为。

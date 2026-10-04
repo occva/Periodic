@@ -3,6 +3,7 @@ import SwiftUI
 private enum SubscriptionDetailSection: String, CaseIterable, Identifiable {
     case periods
     case activity
+    case sharing
 
     var id: String { rawValue }
 
@@ -10,6 +11,7 @@ private enum SubscriptionDetailSection: String, CaseIterable, Identifiable {
         switch self {
         case .periods: AppLocalization.string("周期")
         case .activity: AppLocalization.string("动态")
+        case .sharing: AppLocalization.string("拼车")
         }
     }
 }
@@ -39,6 +41,7 @@ struct SubscriptionDetailView: View {
     @State private var isLoading = false
     @State private var reloadGeneration = 0
     @State private var periodDraft: SubscriptionPeriodDraft?
+    @State private var isEditingSharing = false
     @State private var isSavingPeriod = false
     @State private var periodPendingDeletion: SubscriptionPeriodDTO?
     @State private var isDeletingPeriod = false
@@ -53,6 +56,10 @@ struct SubscriptionDetailView: View {
 
     private var currentSubscription: SubscriptionDTO {
         loadedSubscription ?? subscription
+    }
+
+    private var canShowSharing: Bool {
+        currentSubscription.sharing != nil || periods.contains { $0.sharing != nil } || isEditingSharing
     }
 
     private var rows: [SubscriptionPeriodRow] {
@@ -85,50 +92,72 @@ struct SubscriptionDetailView: View {
                 onConfirmRenewal: { isPresentingRenewalOptions = true },
                 onEditSubscription: onEditSubscription
             )
+            .disabled(periodDraft != nil || isSavingPeriod || isDeletingPeriod || isDeletingPayment || isEditingSharing)
             Divider()
             HStack {
-                Spacer()
-                Picker("历史类型", selection: $selectedSection) {
-                    ForEach(SubscriptionDetailSection.allCases) { section in
+                Picker("详情内容", selection: $selectedSection) {
+                    ForEach(SubscriptionDetailSection.allCases.filter {
+                        $0 != .sharing || canShowSharing
+                    }) { section in
                         Text(section.title).tag(section)
+                            .accessibilityIdentifier("subscription-detail-section-" + section.rawValue)
                     }
                 }
                 .labelsHidden()
                 .pickerStyle(.segmented)
                 .fixedSize()
+                if selectedSection != .sharing {
+                    Text(summaryTitle)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                primaryHistoryAction
+                    .buttonStyle(.glass)
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 12)
             .disabled(
-                periodDraft != nil || isSavingPeriod || isDeletingPeriod || isDeletingPayment
+                periodDraft != nil || isSavingPeriod || isDeletingPeriod || isDeletingPayment || isEditingSharing
             )
-            detailContent
             Divider()
-            HStack {
-                Text(summaryTitle)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                primaryHistoryAction
-
-                Button(dismissButtonTitle) {
-                    if periodDraft == nil {
-                        dismiss()
-                    } else {
-                        cancelPeriodEditing()
+            detailContent
+            if !isEditingSharing {
+                Divider()
+                HStack {
+                    if periodDraft != nil {
+                        Text("修改尚未保存")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
                     }
+                    Spacer()
+
+                    Button(dismissButtonTitle) {
+                        if periodDraft == nil {
+                            dismiss()
+                        } else {
+                            cancelPeriodEditing()
+                        }
+                    }
+                    .keyboardShortcut(.cancelAction)
+                    .disabled(isSavingPeriod)
+                    .buttonStyle(.glass)
                 }
-                .keyboardShortcut(.cancelAction)
-                .disabled(isSavingPeriod)
-                .buttonStyle(.glass)
+                .padding(16)
             }
-            .padding(16)
         }
-        .frame(width: 960, height: 560)
+        .frame(minWidth: 760, idealWidth: 960, minHeight: 520, idealHeight: 620)
         .presentationSizing(.fitted)
+        .interactiveDismissDisabled(isEditingSharing || periodDraft != nil)
         .task(id: subscription.id) { await reload() }
         .onChange(of: subscription.revision) { _, newRevision in
             guard loadedSubscription?.revision != newRevision else { return }
             Task { @MainActor in await reload() }
+        }
+        .onChange(of: canShowSharing) { _, hasSharing in
+            if !hasSharing, selectedSection == .sharing {
+                selectedSection = .periods
+            }
         }
         .errorAlert($error)
         .confirmationDialog(
@@ -144,7 +173,7 @@ struct SubscriptionDetailView: View {
                 Text(String(
                     format: AppLocalization.string("当前方案为 %@，%@。"),
                     renewalCycleTitle,
-                    renewalPreview.money.displayText(style: currencyDisplayStyle)
+                    renewalPreview.defaultPaymentMoney.displayText(style: currencyDisplayStyle)
                 ))
             }
         }
@@ -234,6 +263,16 @@ struct SubscriptionDetailView: View {
                 onCancel: cancelPeriodEditing,
                 onDelete: { periodPendingDeletion = $0 }
             )
+        case .sharing:
+            SubscriptionSharingPeriodsView(
+                subscription: currentSubscription,
+                periods: periods,
+                isLoading: isLoading,
+                isEditing: $isEditingSharing,
+                addPeriod: addPeriod,
+                updatePeriod: updatePeriod,
+                onSaved: { await reload() }
+            )
         case .activity:
             SubscriptionActivityView(
                 payments: payments,
@@ -249,6 +288,7 @@ struct SubscriptionDetailView: View {
     private var summaryTitle: String {
         switch selectedSection {
         case .periods: String(format: AppLocalization.string("共 %d 次"), periods.count)
+        case .sharing: currentSubscription.sharing?.summary ?? ""
         case .activity: String(format: AppLocalization.string("共 %d 笔消费"), payments.count)
         }
     }
@@ -261,6 +301,10 @@ struct SubscriptionDetailView: View {
                 .disabled(
                     periodDraft != nil || isSavingPeriod || isDeletingPeriod || isLoading
                 )
+        case .sharing:
+            if currentSubscription.sharing != nil {
+                Button("编辑当前方案") { onEditSubscription() }
+            }
         case .activity:
             Button("记录消费") {
                 paymentDraft = SubscriptionPaymentDraft(subscription: currentSubscription)
@@ -387,7 +431,7 @@ struct SubscriptionDetailView: View {
             cycleMonths: renewalPreview.cycleMonths,
             quotedMoney: renewalPreview.money,
             paymentDate: .today,
-            paymentMoney: renewalPreview.money,
+            paymentMoney: renewalPreview.defaultPaymentMoney,
             paymentNote: ""
         )
         Task { @MainActor in

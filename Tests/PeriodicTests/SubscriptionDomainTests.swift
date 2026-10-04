@@ -592,6 +592,7 @@ struct SubscriptionDomainTests {
         let controller = PersistenceController()
         let container = try controller.makeContainer(
             schema: Schema([
+                SubscriptionSharingRecord.self,
                 SubscriptionRecord.self,
                 SubscriptionPeriodRecord.self,
                 SubscriptionPaymentRecord.self,
@@ -663,7 +664,7 @@ struct SubscriptionDomainTests {
     @Test func markingNotRenewedStopsSubscriptionWithoutAddingHistory() async throws {
         let controller = PersistenceController()
         let container = try controller.makeContainer(
-            schema: Schema([SubscriptionRecord.self, SubscriptionPeriodRecord.self]),
+            schema: Schema([SubscriptionSharingRecord.self, SubscriptionRecord.self, SubscriptionPeriodRecord.self]),
             inMemory: true
         )
         let store = SubscriptionStore(modelContainer: container)
@@ -764,7 +765,7 @@ struct SubscriptionDomainTests {
     @Test func invalidSubscriptionDoesNotHideValidSubscriptions() async throws {
         let controller = PersistenceController()
         let container = try controller.makeContainer(
-            schema: Schema([SubscriptionRecord.self]),
+            schema: Schema([SubscriptionSharingRecord.self, SubscriptionRecord.self]),
             inMemory: true
         )
         let validInput = SubscriptionCreateInput(
@@ -802,7 +803,7 @@ struct SubscriptionDomainTests {
     @Test func createdSubscriptionCanBeFetched() async throws {
         let controller = PersistenceController()
         let container = try controller.makeContainer(
-            schema: Schema([SubscriptionRecord.self, SubscriptionPeriodRecord.self]),
+            schema: Schema([SubscriptionSharingRecord.self, SubscriptionRecord.self, SubscriptionPeriodRecord.self]),
             inMemory: true
         )
         let store = SubscriptionStore(modelContainer: container)
@@ -856,14 +857,14 @@ struct SubscriptionDomainTests {
 
         do {
             let container = try controller.makeContainer(
-                schema: Schema([SubscriptionRecord.self, SubscriptionPeriodRecord.self])
+                schema: Schema([SubscriptionSharingRecord.self, SubscriptionRecord.self, SubscriptionPeriodRecord.self])
             )
             let store = SubscriptionStore(modelContainer: container)
             _ = try await store.create(input)
         }
 
         let reopened = try controller.makeContainer(
-            schema: Schema([SubscriptionRecord.self, SubscriptionPeriodRecord.self])
+            schema: Schema([SubscriptionSharingRecord.self, SubscriptionRecord.self, SubscriptionPeriodRecord.self])
         )
         let reopenedStore = SubscriptionStore(modelContainer: reopened)
         let records = try await reopenedStore.fetchAll()
@@ -879,7 +880,7 @@ struct SubscriptionDomainTests {
     @Test func editingCurrentPeriodCanOptionallyAppendHistoryAtomically() async throws {
         let controller = PersistenceController()
         let container = try controller.makeContainer(
-            schema: Schema([SubscriptionRecord.self, SubscriptionPeriodRecord.self]),
+            schema: Schema([SubscriptionSharingRecord.self, SubscriptionRecord.self, SubscriptionPeriodRecord.self]),
             inMemory: true
         )
         let store = SubscriptionStore(modelContainer: container)
@@ -966,7 +967,7 @@ struct SubscriptionDomainTests {
     @Test func existingLifetimeSubscriptionWithoutHistoryIsBackfilled() async throws {
         let controller = PersistenceController()
         let container = try controller.makeContainer(
-            schema: Schema([SubscriptionRecord.self, SubscriptionPeriodRecord.self]),
+            schema: Schema([SubscriptionSharingRecord.self, SubscriptionRecord.self, SubscriptionPeriodRecord.self]),
             inMemory: true
         )
         let subscriptionID = UUID()
@@ -1001,7 +1002,7 @@ struct SubscriptionDomainTests {
     @Test func changingExistingSubscriptionToLifetimeUsesCreationDateForHistory() async throws {
         let controller = PersistenceController()
         let container = try controller.makeContainer(
-            schema: Schema([SubscriptionRecord.self, SubscriptionPeriodRecord.self]),
+            schema: Schema([SubscriptionSharingRecord.self, SubscriptionRecord.self, SubscriptionPeriodRecord.self]),
             inMemory: true
         )
         let subscriptionID = UUID()
@@ -1057,7 +1058,7 @@ struct SubscriptionDomainTests {
     @Test func lifetimeBackfillSkipsInvalidCurrencyWithoutRollingBackValidRepairs() async throws {
         let controller = PersistenceController()
         let container = try controller.makeContainer(
-            schema: Schema([SubscriptionRecord.self, SubscriptionPeriodRecord.self]),
+            schema: Schema([SubscriptionSharingRecord.self, SubscriptionRecord.self, SubscriptionPeriodRecord.self]),
             inMemory: true
         )
         let validID = UUID()
