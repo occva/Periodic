@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SubscriptionEditorView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(AppServices.self) private var services
     @AppStorage(PreferenceKey.selectedCurrencies) private var selectedCurrenciesRaw = ""
 
     let subscription: SubscriptionDTO?
@@ -40,6 +41,9 @@ struct SubscriptionEditorView: View {
     @State private var isPresentingPeriodRecordChoice = false
     @State private var pendingSaveInput: SubscriptionCreateInput?
     @State private var error: PresentedError?
+    @State private var initialDraft: SubscriptionEditorDraftSnapshot?
+    @State private var isPresentingDiscardConfirmation = false
+    @State private var stagedIconWrites: [AppleIconCache.ImportedImageWrite] = []
 
     init(
         subscription: SubscriptionDTO? = nil,
@@ -154,9 +158,10 @@ struct SubscriptionEditorView: View {
                                 iconURLString = nil
                             }
                         }
-                        LocalIconPickerButton { reference in
+                        LocalIconPickerButton { write in
+                            stagedIconWrites.append(write)
                             iconResourceName = nil
-                            iconURLString = reference
+                            iconURLString = write.reference
                         }
                         Button("Apple 搜索…") { isPresentingIconPicker = true }
                             .accessibilityIdentifier("search-apple-icon")
@@ -304,7 +309,7 @@ struct SubscriptionEditorView: View {
 
             HStack {
                 Spacer()
-                Button("取消") { dismiss() }
+                Button("取消", action: requestDismiss)
                     .keyboardShortcut(.cancelAction)
                     .disabled(isSaving)
                     .buttonStyle(.glass)
@@ -325,6 +330,24 @@ struct SubscriptionEditorView: View {
             .padding(16)
         }
         .frame(minWidth: 620, maxWidth: 720, minHeight: 660, maxHeight: 740)
+        .onAppear {
+            if initialDraft == nil { initialDraft = draftSnapshot }
+        }
+        .onDisappear {
+            let writes = stagedIconWrites
+            Task { await services.discardUncommittedIcons(writes) }
+        }
+        .interactiveDismissDisabled(isSaving || hasUnsavedChanges)
+        .confirmationDialog(
+            "放弃未保存的修改？",
+            isPresented: $isPresentingDiscardConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("放弃修改", role: .destructive) { dismiss() }
+            Button("继续编辑", role: .cancel) {}
+        } message: {
+            Text("尚未保存的订阅修改将丢失。")
+        }
         .onChange(of: billingKind) { _, kind in
             if kind == .lifetime {
                 hasExpiryDate = false
@@ -346,9 +369,10 @@ struct SubscriptionEditorView: View {
         }
         .errorAlert($error)
         .sheet(isPresented: $isPresentingIconPicker) {
-            AppleIconPickerView(initialQuery: name) { reference in
+            AppleIconPickerView(initialQuery: name) { write in
+                stagedIconWrites.append(write)
                 iconResourceName = nil
-                iconURLString = reference
+                iconURLString = write.reference
             }
         }
         .confirmationDialog(
@@ -454,6 +478,46 @@ struct SubscriptionEditorView: View {
         }
     }
 
+    private var draftSnapshot: SubscriptionEditorDraftSnapshot {
+        SubscriptionEditorDraftSnapshot(
+            name: name,
+            iconResourceName: iconResourceName,
+            iconURLString: iconURLString,
+            category: category,
+            managementState: managementState,
+            billingKind: billingKind,
+            billingCycle: billingCycle,
+            sharing: sharingDraft,
+            amountText: amountText,
+            currency: currency,
+            hasStartDate: hasStartDate,
+            startDate: LocalDate(startDate),
+            hasExpiryDate: hasExpiryDate,
+            expiryDate: LocalDate(expiryDate),
+            reminderEnabled: reminderEnabled,
+            reminderTiming: reminderTiming,
+            customReminderDate: LocalDate(customReminderDate),
+            customReminderFollowsExpiry: customReminderFollowsExpiry,
+            reminderMinuteOfDay: reminderMinuteOfDay,
+            isReminderScheduleModified: isReminderScheduleModified,
+            automaticallyRenews: automaticallyRenews,
+            note: note
+        )
+    }
+
+    private var hasUnsavedChanges: Bool {
+        initialDraft.map { $0 != draftSnapshot } ?? false
+    }
+
+    private func requestDismiss() {
+        guard !isSaving else { return }
+        if hasUnsavedChanges {
+            isPresentingDiscardConfirmation = true
+        } else {
+            dismiss()
+        }
+    }
+
     private var canAddPendingPeriodRecord: Bool {
         guard let input = pendingSaveInput else { return false }
         return input.periodStart != nil && input.expiry != nil
@@ -491,6 +555,10 @@ struct SubscriptionEditorView: View {
         Task { @MainActor in
             do {
                 try await onSave(input, historyPolicy)
+                await services.finalizeCommittedIcons(
+                    stagedIconWrites,
+                    retainedReferences: Set([input.iconURLString].compactMap { $0 })
+                )
                 dismiss()
             } catch {
                 self.error = PresentedError(error, title: "无法保存订阅")
@@ -600,7 +668,7 @@ private enum EditorValidationError: LocalizedError {
     }
 }
 
-private enum SubscriptionReminderTiming: String, CaseIterable, Identifiable {
+enum SubscriptionReminderTiming: String, CaseIterable, Identifiable {
     case oneDayBefore
     case threeDaysBefore
     case sevenDaysBefore

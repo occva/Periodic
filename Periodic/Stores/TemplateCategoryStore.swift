@@ -1,8 +1,21 @@
 import Foundation
 import SwiftData
 
-@ModelActor
-actor TemplateCategoryStore {
+actor TemplateCategoryStore: ModelActor {
+    nonisolated let modelContainer: ModelContainer
+    private nonisolated let database: DatabaseSession
+
+    nonisolated var modelExecutor: any ModelExecutor { database.modelExecutor }
+
+    nonisolated var unownedExecutor: UnownedSerialExecutor {
+        database.serialExecutor.asUnownedSerialExecutor()
+    }
+
+    init(database: DatabaseSession) {
+        modelContainer = database.modelContainer
+        self.database = database
+    }
+
     enum StoreError: LocalizedError {
         case emptyName
         case duplicateName
@@ -42,16 +55,10 @@ actor TemplateCategoryStore {
         guard !name.isEmpty else { throw StoreError.emptyName }
 
         let categories = try modelContext.fetch(FetchDescriptor<TemplateCategoryRecord>())
-        let normalizedName = name.folding(
-            options: [.caseInsensitive, .diacriticInsensitive],
-            locale: .current
-        )
+        let normalizedName = TemplateCategoryName.normalized(name)
         guard !categories.contains(where: {
             $0.id != input.id
-                && $0.name.folding(
-                    options: [.caseInsensitive, .diacriticInsensitive],
-                    locale: .current
-                ) == normalizedName
+                && TemplateCategoryName.normalized($0.name) == normalizedName
         }) else {
             throw StoreError.duplicateName
         }

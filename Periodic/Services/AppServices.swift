@@ -35,15 +35,21 @@ final class AppServices {
         defaults: UserDefaults = .standard
     ) {
         let processArguments = ProcessInfo.processInfo.arguments
-        let useMemoryStore = inMemory ?? processArguments.contains("-store-in-memory")
+        let isTestHost = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+        let useMemoryStore = inMemory
+            ?? (isTestHost || processArguments.contains("-store-in-memory"))
         let enablesSampleNotifications = useMemoryStore
             && processArguments.contains("-enable-test-notifications")
         let resolvedAppleIconCache = appleIconCache ?? AppleIconCache(
-            storageRoot: Self.defaultIconStorageRoot(useMemoryStore: useMemoryStore)
+            storageRoot: Self.defaultIconStorageRoot(
+                useMemoryStore: useMemoryStore,
+                storeURL: persistence.storeURL
+            )
         )
         let resolvedPaymentAttachmentStore = paymentAttachmentStore ?? PaymentAttachmentStore(
             storageRoot: Self.defaultPaymentAttachmentStorageRoot(
-                useMemoryStore: useMemoryStore
+                useMemoryStore: useMemoryStore,
+                storeURL: persistence.storeURL
             )
         )
         self.persistence = persistence
@@ -76,12 +82,13 @@ final class AppServices {
                 inMemory: useMemoryStore
             )
             modelContainer = container
-            subscriptionStore = SubscriptionStore(modelContainer: container)
-            templateStore = TemplateStore(modelContainer: container)
-            templateCategoryStore = TemplateCategoryStore(modelContainer: container)
-            builtinTemplateCategoryStore = BuiltinTemplateCategoryStore(modelContainer: container)
+            let database = DatabaseSession(modelContainer: container)
+            subscriptionStore = SubscriptionStore(database: database)
+            templateStore = TemplateStore(database: database)
+            templateCategoryStore = TemplateCategoryStore(database: database)
+            builtinTemplateCategoryStore = BuiltinTemplateCategoryStore(database: database)
             dataExchange = DataExchangeService(
-                store: DataExchangeStore(modelContainer: container),
+                store: DataExchangeStore(database: database),
                 iconCache: resolvedAppleIconCache,
                 paymentAttachmentStore: resolvedPaymentAttachmentStore
             )
@@ -123,6 +130,10 @@ final class AppServices {
 
     func prepareStoredSubscriptionData() async throws {
         guard usesPersistentStore, let subscriptionStore else { return }
+        if let dataExchange, try await dataExchange.migrateLegacyIconReferences() {
+            notifySubscriptionDataChanged()
+            notifyTemplateDataChanged()
+        }
         let datasetID = AppPreferenceValues.datasetID(in: defaults)
         let backfillKey = PreferenceKey.lifetimePeriodBackfillCompleted(
             datasetID: datasetID
@@ -132,6 +143,7 @@ final class AppServices {
             defaults.set(true, forKey: backfillKey)
         }
         await retryPendingIconCleanup()
+        await removeOrphanedIcons()
         await retryPendingPaymentAttachmentCleanup()
         await removeOrphanedPaymentAttachments()
     }
@@ -247,6 +259,49 @@ final class AppServices {
         )
     }
 
+    func discardUncommittedIcons(_ writes: [AppleIconCache.ImportedImageWrite]) async {
+        guard !writes.isEmpty else { return }
+        guard let dataExchange else {
+            await appleIconCache.releaseImportedImages(writes)
+            return
+        }
+        do {
+            let referenced = try await dataExchange.referencedIconReferences()
+            await appleIconCache.discardImportedImages(writes, keeping: referenced)
+        } catch {
+            await appleIconCache.releaseImportedImages(writes)
+            AppLog.persistence.error("Failed to verify uncommitted subscription icons")
+        }
+    }
+
+    func finalizeCommittedIcons(
+        _ writes: [AppleIconCache.ImportedImageWrite],
+        retainedReferences: Set<String>
+    ) async {
+        await appleIconCache.releaseImportedImages(
+            writes.filter { retainedReferences.contains($0.reference) }
+        )
+        await discardUncommittedIcons(
+            writes.filter { !retainedReferences.contains($0.reference) }
+        )
+    }
+
+    private func removeOrphanedIcons() async {
+        guard let dataExchange else { return }
+        do {
+            let checkpoint = await appleIconCache.cleanupCheckpoint()
+            let referenced = try await dataExchange.referencedIconReferences()
+            let failures = await appleIconCache.removeUnreferencedImages(
+                keeping: referenced,
+                modifiedBefore: Date().addingTimeInterval(-24 * 60 * 60),
+                protectedSince: checkpoint
+            )
+            storePendingIconCleanupReferences(pendingIconCleanupReferences.union(failures))
+        } catch {
+            AppLog.persistence.error("Failed to clean unreferenced subscription icons")
+        }
+    }
+
     func setSubscriptionManagementState(
         _ state: ManagementState,
         targets: [SubscriptionMutationTarget]
@@ -313,9 +368,10 @@ final class AppServices {
 
     static func defaultIconStorageRoot(
         useMemoryStore: Bool,
+        storeURL: URL = AppConfiguration.storeURL,
         temporaryDirectory: URL = FileManager.default.temporaryDirectory
     ) -> URL? {
-        guard useMemoryStore else { return nil }
+        guard useMemoryStore else { return persistentAssetStorageRoot(for: storeURL) }
         return temporaryDirectory
             .appending(path: "Periodic", directoryHint: .isDirectory)
             .appending(path: "InMemoryIconCache", directoryHint: .isDirectory)
@@ -324,13 +380,22 @@ final class AppServices {
 
     static func defaultPaymentAttachmentStorageRoot(
         useMemoryStore: Bool,
+        storeURL: URL = AppConfiguration.storeURL,
         temporaryDirectory: URL = FileManager.default.temporaryDirectory
     ) -> URL? {
-        guard useMemoryStore else { return nil }
+        guard useMemoryStore else { return persistentAssetStorageRoot(for: storeURL) }
         return temporaryDirectory
             .appending(path: "Periodic", directoryHint: .isDirectory)
             .appending(path: "InMemoryPaymentAttachments", directoryHint: .isDirectory)
             .appending(path: UUID().uuidString, directoryHint: .isDirectory)
+    }
+
+    private static func persistentAssetStorageRoot(for storeURL: URL) -> URL? {
+        guard storeURL.standardizedFileURL != AppConfiguration.storeURL.standardizedFileURL else {
+            return nil
+        }
+        return storeURL.deletingLastPathComponent()
+            .appending(path: storeURL.lastPathComponent + ".assets", directoryHint: .isDirectory)
     }
 
     private var pendingIconCleanupReferences: Set<String> {
@@ -352,10 +417,13 @@ final class AppServices {
         let pendingReferences = pendingIconCleanupReferences
         guard !pendingReferences.isEmpty, let dataExchange else { return }
         do {
+            let checkpoint = await appleIconCache.cleanupCheckpoint()
             let referencedImages = try await dataExchange.referencedIconReferences()
-            let orphanedReferences = pendingReferences.subtracting(referencedImages)
+            let orphanedReferences = StoredIconReference.normalized(pendingReferences)
+                .subtracting(StoredIconReference.normalized(referencedImages))
             let failures = await appleIconCache.removeStoredImages(
-                references: orphanedReferences
+                references: orphanedReferences,
+                protectedSince: checkpoint
             )
             storePendingIconCleanupReferences(failures)
         } catch {

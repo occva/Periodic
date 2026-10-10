@@ -37,6 +37,15 @@ struct ContentView: View {
                 .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 280)
         } detail: {
             DetailView(destination: selection.wrappedValue ?? .dashboard, session: session)
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    if let warning = session.partialLoadWarning {
+                        Label(warning, systemImage: "exclamationmark.triangle")
+                            .font(.callout)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(12)
+                            .background(.regularMaterial)
+                    }
+                }
         }
         .frame(minWidth: 960, minHeight: 640)
         .background {
@@ -81,7 +90,6 @@ struct ContentView: View {
                     )
                 }
                 services.notifySubscriptionDataChanged()
-                await session.reload(using: services)
             }
         }
         .sheet(
@@ -113,7 +121,6 @@ struct ContentView: View {
                         }
                         try await store.addPeriod(input)
                         services.notifySubscriptionDataChanged()
-                        await session.reload(using: services)
                     },
                     updatePeriod: { input in
                         guard let store = services.subscriptionStore else {
@@ -121,7 +128,6 @@ struct ContentView: View {
                         }
                         try await store.updatePeriod(input)
                         services.notifySubscriptionDataChanged()
-                        await session.reload(using: services)
                     },
                     deletePeriod: { input in
                         guard let store = services.subscriptionStore else {
@@ -129,27 +135,21 @@ struct ContentView: View {
                         }
                         try await store.deletePeriod(input)
                         services.notifySubscriptionDataChanged()
-                        await session.reload(using: services)
                     },
                     addPayment: { input in
                         try await services.addPayment(input)
-                        await session.reload(using: services)
                     },
                     updatePayment: { input in
                         try await services.updatePayment(input)
-                        await session.reload(using: services)
                     },
                     deletePayment: { input in
                         try await services.deletePayment(input)
-                        await session.reload(using: services)
                     },
                     confirmAutomaticRenewal: { request in
                         _ = try await services.confirmAutomaticRenewal(request)
-                        await session.reload(using: services)
                     },
                     markAutomaticRenewalNotRenewed: { request in
                         try await services.markAutomaticRenewalNotRenewed(request)
-                        await session.reload(using: services)
                     }
                 )
             }
@@ -178,7 +178,6 @@ struct ContentView: View {
                 }
                 _ = try await store.create(input)
                 services.notifySubscriptionDataChanged()
-                await session.reload(using: services)
             }
         }
         .sheet(
@@ -195,11 +194,9 @@ struct ContentView: View {
                 previewRenewal: session.renewalPreview(for:),
                 confirmRenewal: { request in
                     _ = try await services.confirmAutomaticRenewal(request)
-                    await session.reload(using: services)
                 },
                 markNotRenewed: { request in
                     try await services.markAutomaticRenewalNotRenewed(request)
-                    await session.reload(using: services)
                 },
                 onDetails: { id in
                     session.dismissReminderCenter()
@@ -211,13 +208,7 @@ struct ContentView: View {
             )
         }
         .task {
-            do {
-                try await services.prepareStoredSubscriptionData()
-                try await services.prepareDevelopmentDataIfRequested()
-            } catch {
-                session.loadError = PresentedError(error, title: "无法准备订阅数据")
-            }
-            await session.reload(using: services)
+            await session.loadInitialData(using: services)
             applyPendingWindowRoute()
             receiveNotificationSelection()
         }
@@ -236,23 +227,23 @@ struct ContentView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 Task { @MainActor in
-                    await session.reload(using: services)
+                    await session.reload(using: services, reason: .dateContextChange)
                 }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged)) { _ in
             Task { @MainActor in
-                await session.reload(using: services)
+                await session.reload(using: services, reason: .dateContextChange)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .NSSystemClockDidChange)) { _ in
             Task { @MainActor in
-                await session.reload(using: services)
+                await session.reload(using: services, reason: .dateContextChange)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .NSSystemTimeZoneDidChange)) { _ in
             Task { @MainActor in
-                await session.reload(using: services)
+                await session.reload(using: services, reason: .dateContextChange)
             }
         }
         .errorAlert(

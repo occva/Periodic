@@ -96,7 +96,8 @@ struct SubscriptionSharingTests {
     @MainActor
     @Test func sharedCreationForecastsOnlyMyPriceAndCapturesInitialPeriod() async throws {
         let container = try makeContainer()
-        let store = SubscriptionStore(modelContainer: container)
+        let containerDatabase = DatabaseSession(modelContainer: container)
+        let store = SubscriptionStore(database: containerDatabase)
         let input = makeInput(sharing: organizer())
         _ = try await store.create(input)
         let detail = try await store.fetchDetail(for: input.id)
@@ -112,9 +113,82 @@ struct SubscriptionSharingTests {
     }
 
     @MainActor
+    @Test func corruptCurrentSharingSkipsOnlyTheAffectedSubscription() async throws {
+        let container = try makeContainer()
+        let database = DatabaseSession(modelContainer: container)
+        let valid = makeInput(sharing: nil)
+        let invalid = makeInput(sharing: nil)
+        container.mainContext.insert(SubscriptionRecord(input: valid))
+        container.mainContext.insert(SubscriptionRecord(input: invalid))
+        container.mainContext.insert(SubscriptionSharingRecord(
+            subscriptionID: invalid.id,
+            periodID: nil,
+            planData: Data("invalid sharing data".utf8)
+        ))
+        try container.mainContext.save()
+        let store = SubscriptionStore(database: database)
+
+        let result = try await store.loadSubscriptions()
+
+        #expect(result.subscriptions.map(\.id) == [valid.id])
+        #expect(result.invalidRecordCount == 1)
+        await #expect(throws: SubscriptionLoadError.self) {
+            try await store.fetchAll()
+        }
+    }
+
+    @MainActor
+    @Test func invalidSharingMetadataIsAttributedWithoutCountingOrphans() async throws {
+        let container = try makeContainer()
+        let database = DatabaseSession(modelContainer: container)
+        let validPlan = organizer()
+        let valid = makeInput(sharing: nil)
+        let invalidVersion = makeInput(sharing: nil)
+        let invalidOwnerKey = makeInput(sharing: nil)
+        let encodedPlan = try JSONEncoder().encode(validPlan)
+
+        container.mainContext.insert(SubscriptionRecord(input: valid))
+        container.mainContext.insert(SubscriptionRecord(input: invalidVersion))
+        container.mainContext.insert(SubscriptionRecord(input: invalidOwnerKey))
+        container.mainContext.insert(SubscriptionSharingRecord(
+            subscriptionID: valid.id,
+            periodID: nil,
+            planData: encodedPlan
+        ))
+        let versionRecord = SubscriptionSharingRecord(
+            subscriptionID: invalidVersion.id,
+            periodID: nil,
+            planData: encodedPlan
+        )
+        versionRecord.formatVersion = 2
+        container.mainContext.insert(versionRecord)
+        let ownerKeyRecord = SubscriptionSharingRecord(
+            subscriptionID: invalidOwnerKey.id,
+            periodID: nil,
+            planData: encodedPlan
+        )
+        ownerKeyRecord.ownerKey = "invalid-owner:" + UUID().uuidString
+        container.mainContext.insert(ownerKeyRecord)
+        container.mainContext.insert(SubscriptionSharingRecord(
+            subscriptionID: UUID(),
+            periodID: nil,
+            planData: Data("orphan".utf8)
+        ))
+        try container.mainContext.save()
+        let store = SubscriptionStore(database: database)
+
+        let result = try await store.loadSubscriptions()
+
+        #expect(result.subscriptions.map(\.id) == [valid.id])
+        #expect(result.subscriptions.first?.sharing == validPlan)
+        #expect(result.invalidRecordCount == 2)
+    }
+
+    @MainActor
     @Test func currentEditsAndDisablingSharingPreserveHistoryAndRejectStaleWrites() async throws {
         let container = try makeContainer()
-        let store = SubscriptionStore(modelContainer: container)
+        let containerDatabase = DatabaseSession(modelContainer: container)
+        let store = SubscriptionStore(database: containerDatabase)
         let original = makeInput(sharing: organizer())
         _ = try await store.create(original)
         let changed = makeInput(id: original.id, money: price(8_000), sharing: participant(amount: nil))
@@ -139,7 +213,8 @@ struct SubscriptionSharingTests {
     @MainActor
     @Test func invalidBatchRollsBackSubscriptionsPeriodsAndSharing() async throws {
         let container = try makeContainer()
-        let store = SubscriptionStore(modelContainer: container)
+        let containerDatabase = DatabaseSession(modelContainer: container)
+        let store = SubscriptionStore(database: containerDatabase)
         let invalid = makeInput(sharing: .init(role: .organizer, purchaseMoney: nil, members: [member()]))
         await #expect(throws: SubscriptionSharingError.self) {
             try await store.create([makeInput(sharing: organizer()), invalid])
@@ -153,7 +228,8 @@ struct SubscriptionSharingTests {
     @MainActor
     @Test func editingAndDeletingHistoricalPeriodPreservesTheCurrentPlan() async throws {
         let container = try makeContainer()
-        let store = SubscriptionStore(modelContainer: container)
+        let containerDatabase = DatabaseSession(modelContainer: container)
+        let store = SubscriptionStore(database: containerDatabase)
         let input = makeInput(sharing: organizer())
         _ = try await store.create(input)
         let oldPeriod = try #require(try await store.fetchPeriods(for: input.id).first)
@@ -183,7 +259,8 @@ struct SubscriptionSharingTests {
     @MainActor
     @Test func renewalRecordsGrossPaymentPersonalQuoteAndSnapshotOnce() async throws {
         let container = try makeContainer()
-        let store = SubscriptionStore(modelContainer: container)
+        let containerDatabase = DatabaseSession(modelContainer: container)
+        let store = SubscriptionStore(database: containerDatabase)
         let input = makeInput(sharing: organizer())
         _ = try await store.create(input)
         let subscription = try #require(try await store.fetchAll().first)
@@ -211,7 +288,8 @@ struct SubscriptionSharingTests {
     @MainActor
     @Test func failedRenewalRollsBackTheNewSharingSnapshot() async throws {
         let container = try makeContainer()
-        let store = SubscriptionStore(modelContainer: container)
+        let containerDatabase = DatabaseSession(modelContainer: container)
+        let store = SubscriptionStore(database: containerDatabase)
         let input = makeInput(sharing: organizer())
         _ = try await store.create(input)
         let tomorrow = try #require(LocalDate.today.addingDays(1))
@@ -233,7 +311,8 @@ struct SubscriptionSharingTests {
     @MainActor
     @Test func deletionCleansCurrentAndHistoricalPlansAndLifetimeNeverForecasts() async throws {
         let container = try makeContainer()
-        let store = SubscriptionStore(modelContainer: container)
+        let containerDatabase = DatabaseSession(modelContainer: container)
+        let store = SubscriptionStore(database: containerDatabase)
         let input = makeInput(sharing: organizer(), billingKind: .lifetime)
         _ = try await store.create(input)
         let subscription = try #require(try await store.fetchAll().first)
@@ -250,25 +329,27 @@ struct SubscriptionSharingTests {
     @MainActor
     @Test func backupRoundTripsBothPlansAndDetectsSharingConflicts() async throws {
         let source = try makeContainer()
-        let subscriptionStore = SubscriptionStore(modelContainer: source)
+        let sourceDatabase = DatabaseSession(modelContainer: source)
+        let subscriptionStore = SubscriptionStore(database: sourceDatabase)
         let input = makeInput(sharing: organizer())
         _ = try await subscriptionStore.create(input)
         try await subscriptionStore.update(
             makeInput(id: input.id, sharing: participant(amount: nil)),
             expectedRevision: 1, historyPolicy: .currentOnly
         )
-        let snapshot = try await DataExchangeStore(modelContainer: source).snapshot()
+        let snapshot = try await DataExchangeStore(database: sourceDatabase).snapshot()
         let encoded = try DataPackageCodec.encode(snapshot: snapshot, assets: [:])
         let decoded = try DataPackageCodec.decode(fileWrapper: DataPackageCodec.fileWrapper(for: encoded))
         #expect(decoded.manifest.formatVersion == 5)
         #expect(decoded.manifest.minimumReaderVersion == 5)
         #expect(decoded.snapshot == snapshot)
         let destination = try makeContainer()
-        let exchange = DataExchangeStore(modelContainer: destination)
+        let destinationDatabase = DatabaseSession(modelContainer: destination)
+        let exchange = DataExchangeStore(database: destinationDatabase)
         _ = try await exchange.execute(
             imported: decoded.snapshot, expectedDigest: exchange.digest(), conflictResolution: .useImported
         )
-        let detail = try await SubscriptionStore(modelContainer: destination).fetchDetail(for: input.id)
+        let detail = try await SubscriptionStore(database: destinationDatabase).fetchDetail(for: input.id)
         #expect(detail.subscription.sharing == snapshot.subscriptions.first?.sharing)
         #expect(detail.periods.first?.sharing == input.sharing)
         let repeated = try await exchange.execute(
@@ -282,7 +363,7 @@ struct SubscriptionSharingTests {
         _ = try await exchange.execute(imported: changed, expectedDigest: before, conflictResolution: .keepLocal)
         #expect(try await exchange.digest() == before)
         _ = try await exchange.execute(imported: changed, expectedDigest: before, conflictResolution: .useImported)
-        let imported = try await SubscriptionStore(modelContainer: destination).fetchDetail(for: input.id)
+        let imported = try await SubscriptionStore(database: destinationDatabase).fetchDetail(for: input.id)
         #expect(imported.subscription.sharing == changed.subscriptions[0].sharing)
         #expect(imported.periods.first?.sharing == input.sharing)
         #expect(imported.subscription.revision == 2)
@@ -307,7 +388,8 @@ struct SubscriptionSharingTests {
         let container = try PersistenceController(storeURL: url).makeContainer(
             schema: Schema(versionedSchema: AppSchemaV6.self), migrationPlan: AppSchemaMigrationPlan.self
         )
-        let detail = try await SubscriptionStore(modelContainer: container).fetchDetail(for: input.id)
+        let containerDatabase = DatabaseSession(modelContainer: container)
+        let detail = try await SubscriptionStore(database: containerDatabase).fetchDetail(for: input.id)
         #expect(detail.subscription.money == input.money)
         #expect(detail.subscription.sharing == nil)
         #expect(detail.subscription.revision == 1)
@@ -324,12 +406,14 @@ struct SubscriptionSharingTests {
             let container = try PersistenceController(storeURL: url).makeContainer(
                 schema: Schema(versionedSchema: AppSchemaV6.self), migrationPlan: AppSchemaMigrationPlan.self
             )
-            _ = try await SubscriptionStore(modelContainer: container).create(input)
+            let containerDatabase = DatabaseSession(modelContainer: container)
+            _ = try await SubscriptionStore(database: containerDatabase).create(input)
         }
         let reopened = try PersistenceController(storeURL: url).makeContainer(
             schema: Schema(versionedSchema: AppSchemaV6.self), migrationPlan: AppSchemaMigrationPlan.self
         )
-        let detail = try await SubscriptionStore(modelContainer: reopened).fetchDetail(for: input.id)
+        let reopenedDatabase = DatabaseSession(modelContainer: reopened)
+        let detail = try await SubscriptionStore(database: reopenedDatabase).fetchDetail(for: input.id)
         #expect(detail.subscription.sharing == input.sharing)
         #expect(detail.periods.first?.sharing == input.sharing)
         #expect(detail.payments.isEmpty)
@@ -338,8 +422,9 @@ struct SubscriptionSharingTests {
     @MainActor
     @Test func legacyPackageLoadsOrdinarySubscriptionsAndCannotHideSharing() async throws {
         let container = try makeContainer()
-        _ = try await SubscriptionStore(modelContainer: container).create(makeInput(sharing: nil))
-        let snapshot = try await DataExchangeStore(modelContainer: container).snapshot()
+        let containerDatabase = DatabaseSession(modelContainer: container)
+        _ = try await SubscriptionStore(database: containerDatabase).create(makeInput(sharing: nil))
+        let snapshot = try await DataExchangeStore(database: containerDatabase).snapshot()
         let ordinary = try DataPackageCodec.encode(snapshot: snapshot, assets: [:])
         let old = try downgrade(ordinary, to: 4)
         let decoded = try DataPackageCodec.decode(fileWrapper: old)

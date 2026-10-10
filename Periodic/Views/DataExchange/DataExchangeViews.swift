@@ -47,6 +47,8 @@ struct DataImportPreviewView: View {
     let plan: DataImportPlan
     @Binding var conflictResolution: DataImportConflictResolution
     @Binding var importsSettings: Bool
+    @Binding var categoryNameOverrides: [UUID: String]
+    @State private var categoryIDsBeingEdited: Set<UUID> = []
     let isImporting: Bool
     let onCancel: () -> Void
     let onConfirm: () -> Void
@@ -79,6 +81,34 @@ struct DataImportPreviewView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            if !categoryIDsNeedingReview.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("分类名称冲突")
+                        .font(.headline)
+                    Text("请为以下分类设置不同名称。修改只在确认导入后生效，分类关联会保留。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 10) {
+                            ForEach(resolvedCategoryNames.categories.filter {
+                                categoryIDsNeedingReview.contains($0.id)
+                            }) { category in
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(categoryOrigin(category.id))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    TextField("分类名称", text: Binding(
+                                        get: { categoryNameOverrides[category.id] ?? category.name },
+                                        set: { categoryNameOverrides[category.id] = $0 }
+                                    ))
+                                    .textFieldStyle(.roundedBorder)
+                                }
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 160)
+                }
+            }
             if plan.preview.assetCount > 0 {
                 Text(String(
                     format: AppLocalization.string("同时验证并导入 %d 张本地图片。"),
@@ -95,11 +125,34 @@ struct DataImportPreviewView: View {
                 Button("取消", action: onCancel)
                 Button("确认导入", action: onConfirm)
                     .buttonStyle(.borderedProminent)
-                    .disabled(isImporting)
+                    .disabled(isImporting || resolvedCategoryNames.hasUnresolvedNames)
             }
         }
         .padding(24)
         .frame(width: 620)
+        .onAppear { categoryIDsBeingEdited.formUnion(resolvedCategoryNames.unresolvedIDs) }
+        .onChange(of: resolvedCategoryNames.unresolvedIDs) { _, ids in
+            categoryIDsBeingEdited.formUnion(ids)
+        }
+    }
+
+    private var resolvedCategoryNames: DataImportCategoryNames {
+        DataImportCategoryNames(
+            local: plan.localCategories, imported: plan.package.snapshot.categories,
+            conflictResolution: conflictResolution, overrides: categoryNameOverrides
+        )
+    }
+
+    private var categoryIDsNeedingReview: Set<UUID> {
+        categoryIDsBeingEdited.union(resolvedCategoryNames.unresolvedIDs)
+            .union(categoryNameOverrides.keys)
+    }
+
+    private func categoryOrigin(_ id: UUID) -> String {
+        if plan.localCategories.contains(where: { $0.id == id }) {
+            return AppLocalization.string("本地分类")
+        }
+        return AppLocalization.string("数据包分类")
     }
 
     private var rows: [ImportPreviewRow] {
@@ -159,6 +212,7 @@ struct DataExchangePresentationModifier: ViewModifier {
                         plan: plan,
                         conflictResolution: $feature.conflictResolution,
                         importsSettings: $feature.importsSettings,
+                        categoryNameOverrides: $feature.categoryNameOverrides,
                         isImporting: feature.isBusy,
                         onCancel: { feature.isPresentingImportPreview = false },
                         onConfirm: {

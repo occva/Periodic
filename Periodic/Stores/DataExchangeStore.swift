@@ -2,8 +2,21 @@ import CryptoKit
 import Foundation
 import SwiftData
 
-@ModelActor
-actor DataExchangeStore {
+actor DataExchangeStore: ModelActor {
+    nonisolated let modelContainer: ModelContainer
+    private nonisolated let database: DatabaseSession
+
+    nonisolated var modelExecutor: any ModelExecutor { database.modelExecutor }
+
+    nonisolated var unownedExecutor: UnownedSerialExecutor {
+        database.serialExecutor.asUnownedSerialExecutor()
+    }
+
+    init(database: DatabaseSession) {
+        modelContainer = database.modelContainer
+        self.database = database
+    }
+
     private var sharingPersistence: SubscriptionSharingPersistence {
         SubscriptionSharingPersistence(context: modelContext)
     }
@@ -174,6 +187,36 @@ actor DataExchangeStore {
         return Set(subscriptionReferences).union(templateReferences)
     }
 
+    func normalizeIconReferences(_ preparedReferences: Set<String>) throws -> Bool {
+        guard !preparedReferences.isEmpty else { return false }
+        do {
+            let subscriptions = try modelContext.fetch(FetchDescriptor<SubscriptionRecord>())
+            let templates = try modelContext.fetch(FetchDescriptor<ServiceTemplateRecord>())
+            var didChange = false
+            for record in subscriptions {
+                guard let reference = record.iconURLString,
+                      preparedReferences.contains(reference) else { continue }
+                let normalized = StoredIconReference.normalized(reference)
+                guard normalized != reference else { continue }
+                record.iconURLString = normalized
+                didChange = true
+            }
+            for record in templates {
+                guard let reference = record.iconURLString,
+                      preparedReferences.contains(reference) else { continue }
+                let normalized = StoredIconReference.normalized(reference)
+                guard normalized != reference else { continue }
+                record.iconURLString = normalized
+                didChange = true
+            }
+            if didChange { try modelContext.save() }
+            return didChange
+        } catch {
+            modelContext.rollback()
+            throw error
+        }
+    }
+
     func referencedPaymentAttachmentReferences() throws -> Set<String> {
         let current = try modelContext.fetch(
             FetchDescriptor<SubscriptionPaymentAttachmentItemRecord>()
@@ -200,7 +243,8 @@ actor DataExchangeStore {
     func execute(
         imported: DataPackageSnapshot,
         expectedDigest: String,
-        conflictResolution: DataImportConflictResolution
+        conflictResolution: DataImportConflictResolution,
+        categoryNameOverrides: [UUID: String] = [:]
     ) throws -> DataImportReceipt {
         for value in imported.subscriptions {
             try value.sharing?.validate(myMoney: Money(minorUnits: value.amountMinor, currency: value.currency))
@@ -211,6 +255,10 @@ actor DataExchangeStore {
         guard try digest() == expectedDigest else { throw DataExchangeError.stalePlan }
         do {
             let local = try snapshot()
+            let resolvedCategories = try DataImportCategoryNames(
+                local: local.categories, imported: imported.categories,
+                conflictResolution: conflictResolution, overrides: categoryNameOverrides
+            ).validatedCategories()
             let localCategoriesByID = Dictionary(uniqueKeysWithValues: local.categories.map { ($0.id, $0) })
             let localSubscriptionsByID = Dictionary(uniqueKeysWithValues: local.subscriptions.map { ($0.id, $0) })
             let localPeriodsByID = Dictionary(uniqueKeysWithValues: local.periods.map { ($0.id, $0) })
@@ -227,15 +275,14 @@ actor DataExchangeStore {
 
             let categories = try modelContext.fetch(FetchDescriptor<TemplateCategoryRecord>())
             let categoriesByID = Dictionary(uniqueKeysWithValues: categories.map { ($0.id, $0) })
-            for incoming in imported.categories {
+            let importedCategoryIDs = Set(imported.categories.map(\.id))
+            for incoming in resolvedCategories {
                 if let record = categoriesByID[incoming.id] {
                     if localCategoriesByID[incoming.id] == incoming {
-                        skipped += 1
-                    } else if conflictResolution == .useImported {
+                        if importedCategoryIDs.contains(incoming.id) { skipped += 1 }
+                    } else {
                         apply(incoming, to: record)
                         updated += 1
-                    } else {
-                        skipped += 1
                     }
                 } else {
                     modelContext.insert(makeCategory(incoming))
@@ -435,7 +482,7 @@ actor DataExchangeStore {
         record.name = value.name
         record.symbolName = value.symbolName
         record.iconResourceName = value.iconResourceName
-        record.iconURLString = value.iconAssetID
+        record.iconURLString = value.iconAssetID.map(StoredIconReference.normalized)
         record.categoryRaw = value.category.rawValue
         record.managementStateRaw = value.managementState.rawValue
         record.billingKindRaw = value.billingKind.rawValue
@@ -627,7 +674,7 @@ actor DataExchangeStore {
         record.customCategoryID = value.customCategoryID
         record.symbolName = value.symbolName
         record.iconResourceName = value.iconResourceName
-        record.iconURLString = value.iconAssetID
+        record.iconURLString = value.iconAssetID.map(StoredIconReference.normalized)
         record.suggestedBillingKindRaw = value.suggestedBillingKind.rawValue
         record.suggestedCycleMonths = value.suggestedCycleMonths
         record.suggestedAmountMinor = value.suggestedAmountMinor

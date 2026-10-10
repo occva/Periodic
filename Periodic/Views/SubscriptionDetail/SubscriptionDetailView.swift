@@ -269,6 +269,7 @@ struct SubscriptionDetailView: View {
                 periods: periods,
                 isLoading: isLoading,
                 isEditing: $isEditingSharing,
+                onEditCurrentPlan: onEditSubscription,
                 addPeriod: addPeriod,
                 updatePeriod: updatePeriod,
                 onSaved: { await reload() }
@@ -302,9 +303,7 @@ struct SubscriptionDetailView: View {
                     periodDraft != nil || isSavingPeriod || isDeletingPeriod || isLoading
                 )
         case .sharing:
-            if currentSubscription.sharing != nil {
-                Button("编辑当前方案") { onEditSubscription() }
-            }
+            EmptyView()
         case .activity:
             Button("记录消费") {
                 paymentDraft = SubscriptionPaymentDraft(subscription: currentSubscription)

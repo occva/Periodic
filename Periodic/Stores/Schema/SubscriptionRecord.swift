@@ -31,7 +31,7 @@ final class SubscriptionRecord {
         name = input.name
         symbolName = input.symbolName
         iconResourceName = input.iconResourceName
-        iconURLString = input.iconURLString
+        iconURLString = input.iconURLString.map(StoredIconReference.normalized)
         categoryRaw = input.category.rawValue
         managementStateRaw = input.managementState.rawValue
         billingKindRaw = input.billingKind.rawValue
@@ -57,7 +57,7 @@ final class SubscriptionRecord {
         name = input.name
         symbolName = input.symbolName
         iconResourceName = input.iconResourceName
-        iconURLString = input.iconURLString
+        iconURLString = input.iconURLString.map(StoredIconReference.normalized)
         categoryRaw = input.category.rawValue
         managementStateRaw = input.managementState.rawValue
         billingKindRaw = input.billingKind.rawValue

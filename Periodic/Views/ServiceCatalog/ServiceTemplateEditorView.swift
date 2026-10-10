@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ServiceTemplateEditorView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(AppServices.self) private var services
     @AppStorage(PreferenceKey.selectedCurrencies) private var selectedCurrenciesRaw = ""
 
     let template: ServiceTemplateDTO?
@@ -20,6 +21,7 @@ struct ServiceTemplateEditorView: View {
     @State private var isSaving = false
     @State private var isPresentingIconPicker = false
     @State private var error: PresentedError?
+    @State private var stagedIconWrites: [AppleIconCache.ImportedImageWrite] = []
 
     init(
         template: ServiceTemplateDTO? = nil,
@@ -82,9 +84,10 @@ struct ServiceTemplateEditorView: View {
                             iconURLString = nil
                         }
                     }
-                    LocalIconPickerButton { reference in
+                    LocalIconPickerButton { write in
+                        stagedIconWrites.append(write)
                         iconResourceName = nil
-                        iconURLString = reference
+                        iconURLString = write.reference
                     }
                     Button("Apple 搜索…") { isPresentingIconPicker = true }
                         .accessibilityIdentifier("search-apple-icon")
@@ -146,12 +149,18 @@ struct ServiceTemplateEditorView: View {
         .navigationTitle(navigationTitle)
         .frame(minWidth: 620, maxWidth: 720, minHeight: 600, maxHeight: 700)
         .sheet(isPresented: $isPresentingIconPicker) {
-            AppleIconPickerView(initialQuery: name) { reference in
+            AppleIconPickerView(initialQuery: name) { write in
+                stagedIconWrites.append(write)
                 iconResourceName = nil
-                iconURLString = reference
+                iconURLString = write.reference
             }
         }
         .errorAlert($error)
+        .interactiveDismissDisabled(isSaving)
+        .onDisappear {
+            let writes = stagedIconWrites
+            Task { await services.discardUncommittedIcons(writes) }
+        }
     }
 
     private var navigationTitle: String {
@@ -172,6 +181,10 @@ struct ServiceTemplateEditorView: View {
             Task { @MainActor in
                 do {
                     try await onSave(input)
+                    await services.finalizeCommittedIcons(
+                        stagedIconWrites,
+                        retainedReferences: Set([input.iconURLString].compactMap { $0 })
+                    )
                     dismiss()
                 } catch {
                     self.error = PresentedError(error, title: "无法保存模板")

@@ -118,7 +118,8 @@ struct SubscriptionAnalyticsTests {
             schema: Schema([SubscriptionSharingRecord.self, SubscriptionRecord.self, SubscriptionPeriodRecord.self]),
             inMemory: true
         )
-        let store = SubscriptionStore(modelContainer: container)
+        let containerDatabase = DatabaseSession(modelContainer: container)
+        let store = SubscriptionStore(database: containerDatabase)
         let inputs = DevelopmentSubscriptionDataset.make(referenceDate: anchor)
 
         try await store.create(inputs)
@@ -395,7 +396,8 @@ struct SubscriptionAnalyticsTests {
             schema: Schema([SubscriptionSharingRecord.self, SubscriptionRecord.self, SubscriptionPeriodRecord.self]),
             inMemory: true
         )
-        let store = SubscriptionStore(modelContainer: container)
+        let containerDatabase = DatabaseSession(modelContainer: container)
+        let store = SubscriptionStore(database: containerDatabase)
         let inputs = DevelopmentSubscriptionDataset.make(referenceDate: anchor, count: 20)
         let historicalPeriods = DevelopmentSubscriptionDataset.makeHistoricalPeriods(for: inputs)
 

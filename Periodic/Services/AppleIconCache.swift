@@ -32,32 +32,46 @@ actor AppleIconCache {
         }
     }
 
-    private let session: URLSession
+    private let download: @Sendable (URL) async throws -> (Data, URLResponse)
     private let fileManager: FileManager
     private let storageRoot: URL?
+    private let legacyStorageRoot: URL?
     private var imageWriteLeases = ImageWriteLeases()
     private var createdImportedReferences = Set<String>()
+    private var retentionGeneration = 0
+    private var retainedGenerations: [String: Int] = [:]
 
     init(
         session: URLSession = .shared,
         fileManager: FileManager = .default,
-        storageRoot: URL? = nil
+        storageRoot: URL? = nil,
+        legacyStorageRoot: URL? = nil,
+        download: (@Sendable (URL) async throws -> (Data, URLResponse))? = nil
     ) {
-        self.session = session
+        self.download = download ?? { url in try await session.data(from: url) }
         self.fileManager = fileManager
         self.storageRoot = storageRoot
+        self.legacyStorageRoot = legacyStorageRoot ?? storageRoot?.appending(
+            path: "LegacyAppleServiceIcons", directoryHint: .isDirectory
+        )
     }
 
-    private static let referencePrefix = "apple-icon:"
-    private static let localReferencePrefix = "user-icon:"
+    private static let referencePrefix = StoredIconReference.Source.apple.prefix
+    private static let localReferencePrefix = StoredIconReference.Source.user.prefix
     func persist(from url: URL) async throws -> String {
+        let write = try await persistDraftImage(from: url)
+        releaseImportedImages([write])
+        return write.reference
+    }
+
+    func persistDraftImage(from url: URL) async throws -> ImportedImageWrite {
         guard url.scheme == "https" else { throw CacheError.invalidURL }
         guard let host = url.host?.lowercased(),
               host == "mzstatic.com" || host.hasSuffix(".mzstatic.com") else {
             throw CacheError.unsupportedHost
         }
 
-        let (data, response) = try await session.data(from: url)
+        let (data, response) = try await download(url)
         guard let http = response as? HTTPURLResponse,
               (200..<300).contains(http.statusCode),
               http.mimeType?.hasPrefix("image/") == true,
@@ -68,15 +82,32 @@ actor AppleIconCache {
             throw CacheError.imageTooLarge
         }
         try validateImageData(data)
-        let key = cacheKey(for: url.absoluteString)
-        let destination = try storedIconDirectory()
+        let directory = try storedIconDirectory()
+        var key = cacheKey(for: data)
+        var destination = directory
             .appending(path: key)
             .appendingPathExtension("image")
-        try data.write(to: destination, options: .atomic)
-        return Self.referencePrefix + key
+        if fileManager.fileExists(atPath: destination.path),
+           (try? Data(contentsOf: destination)) != data {
+            key = cacheKey(for: data + Data(UUID().uuidString.utf8))
+            destination = directory.appending(path: key).appendingPathExtension("image")
+        }
+        let didCreateFile = !fileManager.fileExists(atPath: destination.path)
+        if didCreateFile {
+            try data.write(to: destination, options: .atomic)
+        }
+        let reference = Self.referencePrefix + key
+        if didCreateFile { createdImportedReferences.insert(reference) }
+        return ImportedImageWrite(key: key, lease: imageWriteLeases.acquire(for: reference))
     }
 
     func persistLocalImage(from url: URL) throws -> String {
+        let write = try persistDraftLocalImage(from: url)
+        releaseImportedImages([write])
+        return write.reference
+    }
+
+    func persistDraftLocalImage(from url: URL) throws -> ImportedImageWrite {
         let isAccessingSecurityScopedResource = url.startAccessingSecurityScopedResource()
         defer {
             if isAccessingSecurityScopedResource {
@@ -98,17 +129,7 @@ actor AppleIconCache {
         }
         try validateImageData(data)
 
-        let key = cacheKey(for: data)
-        let destination = try storedLocalIconDirectory()
-            .appending(path: key)
-            .appendingPathExtension("image")
-        if !fileManager.fileExists(atPath: destination.path) {
-            try data.write(to: destination, options: .atomic)
-        }
-        let reference = Self.localReferencePrefix + key
-        imageWriteLeases.retain(reference: reference)
-        createdImportedReferences.remove(reference)
-        return reference
+        return try persistImportedImage(data)
     }
 
     func persistImportedImage(_ data: Data) throws -> ImportedImageWrite {
@@ -139,54 +160,40 @@ actor AppleIconCache {
         keeping references: Set<String> = []
     ) {
         let releasedReferences = imageWriteLeases.release(writes.map(\.lease))
-        for write in writes where releasedReferences.contains(write.reference)
-            && createdImportedReferences.contains(write.reference)
-            && !references.contains(write.reference) {
-            let url: URL
-            do {
-                url = try storedLocalIconDirectory()
-                    .appending(path: write.key)
-                    .appendingPathExtension("image")
-                try fileManager.removeItem(at: url)
-            } catch {
-                guard (error as NSError).code == NSFileNoSuchFileError else {
-                    AppLog.persistence.error("Failed to remove an unreferenced imported icon")
-                    continue
-                }
-            }
-            createdImportedReferences.remove(write.reference)
-            imageWriteLeases.forget(write.reference)
-        }
+        let retained = Set(references.compactMap { try? canonicalReference(for: $0) })
+        _ = removeStoredImages(references: releasedReferences
+            .intersection(createdImportedReferences).subtracting(retained))
     }
 
     func releaseImportedImages(_ writes: [ImportedImageWrite]) {
         imageWriteLeases.retain(writes.map(\.lease))
         createdImportedReferences.subtract(writes.map(\.reference))
+        retentionGeneration &+= 1
+        for write in writes { retainedGenerations[write.reference] = retentionGeneration }
     }
 
-    func removeStoredImages(references: Set<String>) -> Set<String> {
+    func cleanupCheckpoint() -> Int { retentionGeneration }
+
+    func removeStoredImages(
+        references: Set<String>,
+        protectedSince checkpoint: Int? = nil
+    ) -> Set<String> {
         var failedReferences = Set<String>()
         for reference in references {
-            guard !imageWriteLeases.hasActiveLease(for: reference) else {
+            guard let canonical = try? canonicalReference(for: reference) else { continue }
+            if let checkpoint, (retainedGenerations[canonical] ?? 0) > checkpoint {
                 failedReferences.insert(reference)
                 continue
             }
-            let key: String
-            if reference.hasPrefix(Self.referencePrefix) {
-                key = String(reference.dropFirst(Self.referencePrefix.count))
-            } else if reference.hasPrefix(Self.localReferencePrefix) {
-                key = String(reference.dropFirst(Self.localReferencePrefix.count))
-            } else {
+            guard !imageWriteLeases.hasActiveLease(for: canonical) else {
+                failedReferences.insert(reference)
                 continue
             }
             do {
-                try validateCacheKey(key)
-                let directory = reference.hasPrefix(Self.referencePrefix)
-                    ? try storedIconDirectory()
-                    : try storedLocalIconDirectory()
-                try fileManager.removeItem(
-                    at: directory.appending(path: key).appendingPathExtension("image")
-                )
+                for url in try storedLocations(for: canonical) where
+                    fileManager.fileExists(atPath: url.path) {
+                    try fileManager.removeItem(at: url)
+                }
             } catch {
                 guard (error as NSError).code == NSFileNoSuchFileError else {
                     failedReferences.insert(reference)
@@ -194,10 +201,66 @@ actor AppleIconCache {
                     continue
                 }
             }
-            createdImportedReferences.remove(reference)
-            imageWriteLeases.forget(reference)
+            createdImportedReferences.remove(canonical)
+            imageWriteLeases.forget(canonical)
+            retainedGenerations.removeValue(forKey: canonical)
         }
         return failedReferences
+    }
+
+    func removeUnreferencedImages(
+        keeping references: Set<String>,
+        modifiedBefore cutoff: Date,
+        protectedSince checkpoint: Int? = nil
+    ) -> Set<String> {
+        let retained = Set(references.compactMap { try? canonicalReference(for: $0) })
+        var candidates = Set<String>()
+        do {
+            let directories = [
+                (try storedIconDirectory(), Self.referencePrefix),
+                (try storedLocalIconDirectory(), Self.localReferencePrefix),
+                (try legacyCacheDirectory(), Self.referencePrefix),
+            ]
+            for (directory, prefix) in directories where
+                fileManager.fileExists(atPath: directory.path) {
+                let urls = try fileManager.contentsOfDirectory(
+                    at: directory,
+                    includingPropertiesForKeys: [.contentModificationDateKey]
+                )
+                for url in urls where url.pathExtension == "image" {
+                    let key = url.deletingPathExtension().lastPathComponent
+                    guard (try? validateCacheKey(key)) != nil,
+                          let modified = try url.resourceValues(
+                            forKeys: [.contentModificationDateKey]
+                          ).contentModificationDate,
+                          modified < cutoff else { continue }
+                    candidates.insert(prefix + key)
+                }
+            }
+        } catch {
+            AppLog.persistence.error("Failed to inspect unreferenced subscription icons")
+        }
+        return removeStoredImages(
+            references: candidates.subtracting(retained),
+            protectedSince: checkpoint
+        )
+    }
+
+    private func canonicalReference(for reference: String) throws -> String {
+        guard let storedReference = StoredIconReference(rawValue: reference) else {
+            throw CacheError.invalidReference
+        }
+        return storedReference.rawValue
+    }
+
+    private func storedLocations(for reference: String) throws -> [URL] {
+        let isApple = reference.hasPrefix(Self.referencePrefix)
+        let prefix = isApple ? Self.referencePrefix : Self.localReferencePrefix
+        let key = String(reference.dropFirst(prefix.count))
+        let directories = isApple
+            ? [try storedIconDirectory(), try legacyCacheDirectory()]
+            : [try storedLocalIconDirectory()]
+        return directories.map { $0.appending(path: key).appendingPathExtension("image") }
     }
 
     func validateImportedImage(_ data: Data) throws {
@@ -208,27 +271,18 @@ actor AppleIconCache {
     }
 
     func data(for reference: String) throws -> Data {
-        if reference.hasPrefix(Self.referencePrefix) {
-            let key = String(reference.dropFirst(Self.referencePrefix.count))
-            try validateCacheKey(key)
-            return try storedData(forKey: key, in: storedIconDirectory())
-        }
-        if reference.hasPrefix(Self.localReferencePrefix) {
-            let key = String(reference.dropFirst(Self.localReferencePrefix.count))
-            try validateCacheKey(key)
-            return try storedData(forKey: key, in: storedLocalIconDirectory())
-        }
-
-        // Earlier development builds stored the Apple URL and cached the bytes.
-        // Migrate an existing cached file without issuing a background request.
-        guard let url = URL(string: reference), url.scheme == "https",
-              let host = url.host?.lowercased(),
-              host == "mzstatic.com" || host.hasSuffix(".mzstatic.com") else {
+        guard let storedReference = StoredIconReference(rawValue: reference) else {
             throw CacheError.invalidReference
         }
-        let key = cacheKey(for: reference)
-        if let data = try? storedData(forKey: key, in: storedIconDirectory()) {
-            return data
+        let key = storedReference.key
+        if storedReference.source == .user {
+            return try storedData(forKey: key, in: storedLocalIconDirectory())
+        }
+        let destination = try storedIconDirectory()
+            .appending(path: key)
+            .appendingPathExtension("image")
+        if fileManager.fileExists(atPath: destination.path) {
+            return try Data(contentsOf: destination)
         }
         let legacySource = try legacyCacheDirectory()
             .appending(path: key)
@@ -237,11 +291,14 @@ actor AppleIconCache {
             throw CacheError.storedImageMissing
         }
         let data = try Data(contentsOf: legacySource)
-        let destination = try storedIconDirectory()
-            .appending(path: key)
-            .appendingPathExtension("image")
+        try validateImageData(data)
         try data.write(to: destination, options: .atomic)
         return data
+    }
+
+    func prepareStoredImage(for reference: String) throws {
+        let data = try data(for: reference)
+        try validateImageData(data)
     }
 
     private func storedData(forKey key: String, in directory: URL) throws -> Data {
@@ -273,6 +330,7 @@ actor AppleIconCache {
     }
 
     private func legacyCacheDirectory() throws -> URL {
+        if let legacyStorageRoot { return legacyStorageRoot }
         let base = try fileManager.url(
             for: .cachesDirectory,
             in: .userDomainMask,
@@ -280,10 +338,6 @@ actor AppleIconCache {
             create: true
         )
         return base.appending(path: "AppleServiceIcons", directoryHint: .isDirectory)
-    }
-
-    private func cacheKey(for urlString: String) -> String {
-        cacheKey(for: Data(urlString.utf8))
     }
 
     private func cacheKey(for data: Data) -> String {

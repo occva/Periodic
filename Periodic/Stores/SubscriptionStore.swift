@@ -1,8 +1,21 @@
 import Foundation
 import SwiftData
 
-@ModelActor
-actor SubscriptionStore {
+actor SubscriptionStore: ModelActor {
+    nonisolated let modelContainer: ModelContainer
+    private nonisolated let database: DatabaseSession
+
+    nonisolated var modelExecutor: any ModelExecutor { database.modelExecutor }
+
+    nonisolated var unownedExecutor: UnownedSerialExecutor {
+        database.serialExecutor.asUnownedSerialExecutor()
+    }
+
+    init(database: DatabaseSession) {
+        modelContainer = database.modelContainer
+        self.database = database
+    }
+
     enum StoreError: LocalizedError, Equatable {
         case invalidStoredValue(String)
         case notFound
@@ -34,27 +47,42 @@ actor SubscriptionStore {
     }
 
     func fetchAll() throws -> [SubscriptionDTO] {
+        let result = try loadSubscriptions()
+        guard result.invalidRecordCount == 0 else {
+            throw SubscriptionLoadError.invalidRecords(result.invalidRecordCount)
+        }
+        return result.subscriptions
+    }
+
+    func loadSubscriptions() throws -> SubscriptionLoadResult {
         let descriptor = FetchDescriptor<SubscriptionRecord>(
             sortBy: [SortDescriptor(\.createdAt, order: .forward)]
         )
         let records = try modelContext.fetch(descriptor)
-        let sharingPlans = try sharingPersistence.plansByOwnerKey(in: .currentSubscriptions)
+        let sharingResult = try sharingPersistence.loadCurrentPlans()
         var subscriptions: [SubscriptionDTO] = []
-        var firstConversionError: (any Error)?
+        var invalidRecordCount = 0
         for record in records {
+            guard !sharingResult.invalidSubscriptionIDs.contains(record.id) else {
+                invalidRecordCount += 1
+                continue
+            }
             do {
-                subscriptions.append(try makeDTO(record, sharingPlans: sharingPlans))
+                subscriptions.append(try makeDTO(
+                    record,
+                    sharingPlans: sharingResult.plansByOwnerKey
+                ))
             } catch {
-                firstConversionError = firstConversionError ?? error
+                invalidRecordCount += 1
             }
         }
-        if subscriptions.isEmpty, !records.isEmpty, let firstConversionError {
-            throw firstConversionError
-        }
-        if firstConversionError != nil {
+        if invalidRecordCount > 0 {
             AppLog.persistence.warning("Skipped invalid subscription records while loading")
         }
-        return subscriptions
+        return SubscriptionLoadResult(
+            subscriptions: subscriptions,
+            invalidRecordCount: invalidRecordCount
+        )
     }
 
     func create(
@@ -424,9 +452,9 @@ actor SubscriptionStore {
                 deletedSubscriptionCount: targets.count,
                 deletedPeriodCount: periods.count,
                 deletedPaymentCount: payments.count,
-                unreferencedIconReferences: candidateIconReferences
-                    .subtracting(remainingSubscriptionReferences)
-                    .subtracting(templateReferences),
+                unreferencedIconReferences: StoredIconReference.normalized(candidateIconReferences)
+                    .subtracting(StoredIconReference.normalized(remainingSubscriptionReferences))
+                    .subtracting(StoredIconReference.normalized(templateReferences)),
                 unreferencedPaymentAttachmentReferences: candidateAttachmentReferences
                     .subtracting(remainingAttachmentReferences)
             )

@@ -28,7 +28,7 @@ final class ServiceTemplateRecord {
         customCategoryID = input.customCategoryID
         symbolName = input.symbolName
         iconResourceName = input.iconResourceName
-        iconURLString = input.iconURLString
+        iconURLString = input.iconURLString.map(StoredIconReference.normalized)
         suggestedBillingKindRaw = input.suggestedBillingKind.rawValue
         suggestedCycleMonths = input.suggestedCycleMonths
         suggestedAmountMinor = input.suggestedMoney?.minorUnits
@@ -46,7 +46,7 @@ final class ServiceTemplateRecord {
         customCategoryID = input.customCategoryID
         symbolName = input.symbolName
         iconResourceName = input.iconResourceName
-        iconURLString = input.iconURLString
+        iconURLString = input.iconURLString.map(StoredIconReference.normalized)
         suggestedBillingKindRaw = input.suggestedBillingKind.rawValue
         suggestedCycleMonths = input.suggestedCycleMonths
         suggestedAmountMinor = input.suggestedMoney?.minorUnits

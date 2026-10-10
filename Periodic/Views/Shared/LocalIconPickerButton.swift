@@ -4,11 +4,12 @@ import UniformTypeIdentifiers
 struct LocalIconPickerButton: View {
     @Environment(AppServices.self) private var services
 
-    let onSelect: (String) -> Void
+    let onSelect: (AppleIconCache.ImportedImageWrite) -> Void
 
     @State private var isPresentingFileImporter = false
     @State private var isImporting = false
     @State private var error: PresentedError?
+    @State private var importTask: Task<Void, Never>?
 
     var body: some View {
         Button("本地图片…") {
@@ -23,6 +24,7 @@ struct LocalIconPickerButton: View {
             handleFileSelection(result)
         }
         .errorAlert($error)
+        .onDisappear { importTask?.cancel() }
         .accessibilityIdentifier("choose-local-icon")
     }
 
@@ -38,10 +40,14 @@ struct LocalIconPickerButton: View {
 
     private func importImage(_ url: URL) {
         isImporting = true
-        Task { @MainActor in
+        importTask = Task { @MainActor in
             do {
-                let reference = try await services.appleIconCache.persistLocalImage(from: url)
-                onSelect(reference)
+                let write = try await services.appleIconCache.persistDraftLocalImage(from: url)
+                if Task.isCancelled {
+                    await services.discardUncommittedIcons([write])
+                } else {
+                    onSelect(write)
+                }
                 error = nil
             } catch {
                 self.error = PresentedError(error, title: "无法使用所选图片")

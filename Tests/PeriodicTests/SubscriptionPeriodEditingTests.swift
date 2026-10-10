@@ -48,7 +48,8 @@ struct SubscriptionPeriodEditingTests {
             ]),
             inMemory: true
         )
-        let store = SubscriptionStore(modelContainer: container)
+        let containerDatabase = DatabaseSession(modelContainer: container)
+        let store = SubscriptionStore(database: containerDatabase)
         let subscription = SubscriptionCreateInput(
             id: UUID(),
             name: "可补录周期",
@@ -138,7 +139,8 @@ struct SubscriptionPeriodEditingTests {
             ]),
             inMemory: true
         )
-        let store = SubscriptionStore(modelContainer: container)
+        let containerDatabase = DatabaseSession(modelContainer: container)
+        let store = SubscriptionStore(database: containerDatabase)
         let start = LocalDate(dayNumber: 21_000)
         let expiry = LocalDate(dayNumber: start.dayNumber + 29)
         let subscription = SubscriptionCreateInput(
@@ -211,7 +213,8 @@ struct SubscriptionPeriodEditingTests {
             ]),
             inMemory: true
         )
-        let store = SubscriptionStore(modelContainer: container)
+        let containerDatabase = DatabaseSession(modelContainer: container)
+        let store = SubscriptionStore(database: containerDatabase)
         let start = LocalDate(dayNumber: 21_000)
         let expiry = LocalDate(dayNumber: start.dayNumber + 29)
         let subscription = SubscriptionCreateInput(

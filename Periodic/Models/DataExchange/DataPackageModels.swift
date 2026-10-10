@@ -379,6 +379,13 @@ struct DataPackageCategory: Codable, Equatable, Sendable, Identifiable {
     let createdAt: Date
     let updatedAt: Date
 
+    func renamed(_ name: String) -> Self {
+        Self(
+            recordVersion: recordVersion, id: id, name: name, revision: revision,
+            createdAt: createdAt, updatedAt: updatedAt
+        )
+    }
+
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.id == rhs.id && lhs.name == rhs.name
     }
@@ -501,6 +508,7 @@ struct DataImportPlan: Sendable {
     let targetDigest: String
     let preview: DataImportPreview
     let expiresAt: Date
+    var localCategories: [DataPackageCategory] = []
 }
 
 struct DataImportReceipt: Equatable, Sendable {

@@ -4,6 +4,11 @@ import Observation
 @MainActor
 @Observable
 final class WindowSession {
+    enum ReloadReason {
+        case dataChange
+        case dateContextChange
+    }
+
     var searchText = ""
     var quickView = SubscriptionQuickView.all
     var grouping = OverviewGrouping.none
@@ -25,14 +30,20 @@ final class WindowSession {
     private(set) var isPresentingReminderCenter = false
     private(set) var reminderCenterScope = SubscriptionReminderScope.all
     private(set) var editingSubscriptionID: UUID?
+    private(set) var editingSubscription: SubscriptionDTO?
     private(set) var duplicatingSubscriptionID: UUID?
+    private(set) var duplicatingSubscription: SubscriptionDTO?
     private(set) var subscriptionEditorPreset: SubscriptionTemplatePreset?
     private(set) var detailSubscriptionID: UUID?
     private(set) var subscriptions: [SubscriptionDTO] = []
     private(set) var items: [SubscriptionListItem] = []
     private(set) var isLoading = false
     private(set) var hasLoadedSubscriptions = false
+    private(set) var invalidSubscriptionCount = 0
     var loadError: PresentedError?
+    private var reloadGeneration = 0
+    private var reloadTask: Task<Void, Never>?
+    private var reloadDataVersion: Int?
 
     init(
         referenceDate: LocalDate = .today,
@@ -44,6 +55,11 @@ final class WindowSession {
 
     var analytics: SubscriptionAnalytics {
         SubscriptionAnalytics(items: items, referenceDate: referenceDate)
+    }
+
+    var partialLoadWarning: String? {
+        guard invalidSubscriptionCount > 0 else { return nil }
+        return SubscriptionLoadError.invalidRecords(invalidSubscriptionCount).errorDescription
     }
 
     var filteredItems: [SubscriptionListItem] {
@@ -112,16 +128,6 @@ final class WindowSession {
         reminderItems.count
     }
 
-    var editingSubscription: SubscriptionDTO? {
-        guard let editingSubscriptionID else { return nil }
-        return subscriptions.first { $0.id == editingSubscriptionID }
-    }
-
-    var duplicatingSubscription: SubscriptionDTO? {
-        guard let duplicatingSubscriptionID else { return nil }
-        return subscriptions.first { $0.id == duplicatingSubscriptionID }
-    }
-
     var detailSubscription: SubscriptionDTO? {
         guard let detailSubscriptionID else { return nil }
         return subscriptions.first { $0.id == detailSubscriptionID }
@@ -129,15 +135,19 @@ final class WindowSession {
 
     func presentNewSubscription(preset: SubscriptionTemplatePreset? = nil) {
         editingSubscriptionID = nil
+        editingSubscription = nil
         duplicatingSubscriptionID = nil
+        duplicatingSubscription = nil
         subscriptionEditorPreset = preset
         isPresentingSubscriptionEditor = true
     }
 
     func presentDuplicate(for id: UUID) {
-        guard subscriptions.contains(where: { $0.id == id }) else { return }
+        guard let source = subscriptions.first(where: { $0.id == id }) else { return }
         editingSubscriptionID = nil
+        editingSubscription = nil
         duplicatingSubscriptionID = id
+        duplicatingSubscription = source
         subscriptionEditorPreset = nil
         isPresentingSubscriptionEditor = true
     }
@@ -171,10 +181,12 @@ final class WindowSession {
     }
 
     func presentEditor(for id: UUID) {
-        guard subscriptions.contains(where: { $0.id == id }) else { return }
+        guard let subscription = subscriptions.first(where: { $0.id == id }) else { return }
         subscriptionEditorPreset = nil
         duplicatingSubscriptionID = nil
+        duplicatingSubscription = nil
         editingSubscriptionID = id
+        editingSubscription = subscription
         isPresentingSubscriptionEditor = true
     }
 
@@ -198,7 +210,9 @@ final class WindowSession {
     func dismissEditor() {
         isPresentingSubscriptionEditor = false
         editingSubscriptionID = nil
+        editingSubscription = nil
         duplicatingSubscriptionID = nil
+        duplicatingSubscription = nil
         subscriptionEditorPreset = nil
     }
 
@@ -216,7 +230,46 @@ final class WindowSession {
         overviewCurrency = nil
     }
 
-    func reload(using services: AppServices) async {
+    func loadInitialData(using services: AppServices) async {
+        var preparationError: PresentedError?
+        do {
+            try await services.prepareStoredSubscriptionData()
+            try await services.prepareDevelopmentDataIfRequested()
+        } catch {
+            preparationError = PresentedError(error, title: "无法准备订阅数据")
+        }
+        await reload(using: services)
+        if let preparationError { loadError = preparationError }
+    }
+
+    func reload(
+        using services: AppServices,
+        reason: ReloadReason = .dataChange
+    ) async {
+        let dataVersion = services.subscriptionDataVersion
+        if reason == .dataChange,
+           let reloadTask,
+           reloadDataVersion == dataVersion {
+            await reloadTask.value
+            return
+        }
+        reloadGeneration &+= 1
+        let generation = reloadGeneration
+        reloadTask?.cancel()
+        reloadDataVersion = dataVersion
+        let task = Task { @MainActor in
+            await performReload(using: services, generation: generation)
+        }
+        reloadTask = task
+        await task.value
+        if reloadGeneration == generation {
+            reloadTask = nil
+            reloadDataVersion = nil
+        }
+    }
+
+    private func performReload(using services: AppServices, generation: Int) async {
+        guard !Task.isCancelled, reloadGeneration == generation else { return }
         referenceDate = .today
         exchangeRateRefreshRevision &+= 1
         guard let store = services.subscriptionStore else {
@@ -226,18 +279,31 @@ final class WindowSession {
         }
 
         isLoading = true
-        defer { isLoading = false }
+        defer {
+            if reloadGeneration == generation { isLoading = false }
+        }
         do {
-            subscriptions = try await store.fetchAll()
+            let result = try await store.loadSubscriptions()
+            guard !Task.isCancelled, reloadGeneration == generation else { return }
+            subscriptions = result.subscriptions
             items = subscriptions.map(SubscriptionListItem.init(dto:))
-            await services.reconcileSubscriptionNotifications(
-                subscriptions: subscriptions,
-                referenceDate: referenceDate
-            )
+            invalidSubscriptionCount = result.invalidRecordCount
+            if let detailSubscriptionID,
+               !subscriptions.contains(where: { $0.id == detailSubscriptionID }) {
+                dismissDetails()
+            }
             loadError = nil
+            if result.invalidRecordCount == 0 {
+                await services.reconcileSubscriptionNotifications(
+                    subscriptions: subscriptions,
+                    referenceDate: referenceDate
+                )
+            }
         } catch {
+            guard !Task.isCancelled, reloadGeneration == generation else { return }
             loadError = PresentedError(error, title: "无法读取订阅")
         }
+        guard !Task.isCancelled, reloadGeneration == generation else { return }
         hasLoadedSubscriptions = true
     }
 

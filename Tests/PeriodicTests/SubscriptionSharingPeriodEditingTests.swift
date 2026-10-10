@@ -473,7 +473,8 @@ struct SubscriptionSharingPeriodEditingTests {
         let container = try PersistenceController().makeContainer(
             schema: Schema(versionedSchema: AppSchemaV6.self), inMemory: true
         )
-        let store = SubscriptionStore(modelContainer: container)
+        let containerDatabase = DatabaseSession(modelContainer: container)
+        let store = SubscriptionStore(database: containerDatabase)
         let source = try subscription(role: role)
         _ = try await store.create(SubscriptionCreateInput(
             id: source.id, name: source.name, symbolName: source.symbolName,

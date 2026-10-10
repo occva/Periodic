@@ -3,6 +3,20 @@ import Testing
 @testable import Periodic
 
 struct MoneyTests {
+    @Test func estimatesRoundHalfUnitsUpForEveryCurrencyScale() {
+        for currency in [CurrencyCode.jpy, .usd, .kwd] {
+            let money = Money(minorUnits: 3, currency: currency)
+            let rounded = Money(minorUnits: 1, currency: currency)
+            #expect(money.monthlyEstimate(cycleMonths: 6) == rounded.displayText)
+            #expect(money.prorated(from: 6, to: 1) == rounded)
+            let halfUnit = Decimal(5) / pow(Decimal(10), currency.scale + 1)
+            #expect(Money.display(halfUnit, currency: currency) == rounded.displayText)
+            #expect(Money.displayNumber(halfUnit, currency: currency) == rounded.inputText)
+            #expect(Money(minorUnits: 0, currency: currency).displayText
+                == Money.display(0, currency: currency))
+        }
+    }
+
     @Test func malformedInputIsRejectedInsteadOfPartiallyParsed() {
         for text in [
             "12abc", "1,234.56", "12.3.4", "99元", "1e2xyz",

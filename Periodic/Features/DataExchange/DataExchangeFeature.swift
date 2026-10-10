@@ -21,6 +21,7 @@ final class DataExchangeFeature {
     private(set) var exportDocument: PeriodicDataPackageDocument?
     var conflictResolution = DataImportConflictResolution.keepLocal
     var importsSettings = true
+    var categoryNameOverrides: [UUID: String] = [:]
     var isPresentingImporter = false
     var isPresentingExportPreview = false
     var isPresentingImportPreview = false
@@ -108,6 +109,7 @@ final class DataExchangeFeature {
                     importPlan = try await service.inspect(url: url)
                     conflictResolution = .keepLocal
                     importsSettings = true
+                    categoryNameOverrides = [:]
                     phase = .awaitingImportConfirmation
                     isPresentingImportPreview = true
                 } catch {
@@ -129,14 +131,29 @@ final class DataExchangeFeature {
             error = PresentedError(DataExchangeError.storeUnavailable, title: "无法导入数据")
             return
         }
+        do {
+            _ = try DataImportCategoryNames(
+                local: importPlan.localCategories,
+                imported: importPlan.package.snapshot.categories,
+                conflictResolution: conflictResolution,
+                overrides: categoryNameOverrides
+            ).validatedCategories()
+        } catch {
+            self.error = PresentedError(error, title: "请检查分类名称")
+            return
+        }
         isPresentingImportPreview = false
         phase = .importing
+        let selectedResolution = conflictResolution
+        let selectedSettings = importsSettings
+        let selectedCategoryNames = categoryNameOverrides
         Task {
             do {
                 let receipt = try await service.execute(
                     plan: importPlan,
-                    conflictResolution: conflictResolution,
-                    importsSettings: importsSettings
+                    conflictResolution: selectedResolution,
+                    importsSettings: selectedSettings,
+                    categoryNameOverrides: selectedCategoryNames
                 )
                 self.importPlan = nil
                 await onImported()

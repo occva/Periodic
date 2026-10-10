@@ -1,12 +1,12 @@
 import Foundation
 
-struct SubscriptionSharingMemberDraft: Identifiable {
+struct SubscriptionSharingMemberDraft: Identifiable, Equatable {
     let id: UUID
     var name: String
     var amountText: String
 }
 
-struct SubscriptionSharingDraft {
+struct SubscriptionSharingDraft: Equatable {
     var isEnabled: Bool
     var role: SubscriptionSharingRole
     var purchaseAmountText: String

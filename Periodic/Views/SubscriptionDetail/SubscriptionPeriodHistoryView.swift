@@ -30,17 +30,33 @@ struct SubscriptionPeriodHistoryView: View {
         } else {
             historyTable
                 .sheet(item: $sharingPeriod) { period in
-                    VStack {
-                        Text("本期拼车价格").font(.title2)
-                        Text(period.start.displayText + " – " + (period.end?.displayText ?? "—"))
-                        if let plan = period.sharing {
-                            SubscriptionSharingView(plan: plan, myMoney: period.money)
+                    VStack(spacing: 0) {
+                        VStack(spacing: 8) {
+                            Text("本期拼车价格")
+                                .font(.title2.weight(.semibold))
+                            Text(period.start.displayText + " – " + (period.end?.displayText ?? "—"))
+                                .font(.body)
                         }
+                        .padding(.top, 22)
+                        .padding(.bottom, 18)
+
+                        SubscriptionSharingSectionDivider()
+                            .padding(.horizontal, 28)
+
+                        if let plan = period.sharing {
+                            SubscriptionSharingView(
+                                plan: plan,
+                                myMoney: period.money,
+                                presentationStyle: .periodSheet
+                            )
+                        }
+
                         Button("关闭") { sharingPeriod = nil }
                             .keyboardShortcut(.cancelAction)
+                            .buttonStyle(.bordered)
+                            .padding(.bottom, 18)
                     }
-                    .padding(20)
-                    .frame(width: 560, height: 540)
+                    .frame(width: 560, height: 620)
                 }
         }
     }

@@ -343,6 +343,7 @@ struct SubscriptionMaintenanceTests {
             schema: Schema(versionedSchema: AppSchemaV6.self),
             migrationPlan: AppSchemaMigrationPlan.self
         )
+        let containerDatabase = DatabaseSession(modelContainer: container)
         let context = ModelContext(container)
         let migratedItems = try context.fetch(
             FetchDescriptor<SubscriptionPaymentAttachmentItemRecord>()
@@ -356,7 +357,7 @@ struct SubscriptionMaintenanceTests {
         #expect(migratedItems.map(\.reference) == [reference])
         #expect(migratedItems.map(\.sortOrder) == [0])
         #expect(
-            try await SubscriptionStore(modelContainer: container)
+            try await SubscriptionStore(database: containerDatabase)
                 .fetchPayments(for: subscriptionInput.id)
                 .first?
                 .attachmentReferences == [reference]
@@ -624,7 +625,8 @@ struct SubscriptionMaintenanceTests {
             ]),
             inMemory: true
         )
-        return SubscriptionStore(modelContainer: container)
+        let containerDatabase = DatabaseSession(modelContainer: container)
+        return SubscriptionStore(database: containerDatabase)
     }
 
     private func makeInput(name: String) throws -> SubscriptionCreateInput {

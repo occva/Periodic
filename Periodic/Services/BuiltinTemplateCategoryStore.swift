@@ -1,8 +1,21 @@
 import Foundation
 import SwiftData
 
-@ModelActor
-actor BuiltinTemplateCategoryStore {
+actor BuiltinTemplateCategoryStore: ModelActor {
+    nonisolated let modelContainer: ModelContainer
+    private nonisolated let database: DatabaseSession
+
+    nonisolated var modelExecutor: any ModelExecutor { database.modelExecutor }
+
+    nonisolated var unownedExecutor: UnownedSerialExecutor {
+        database.serialExecutor.asUnownedSerialExecutor()
+    }
+
+    init(database: DatabaseSession) {
+        modelContainer = database.modelContainer
+        self.database = database
+    }
+
     enum StoreError: LocalizedError {
         case categoryNotFound
 

@@ -141,7 +141,7 @@ struct SubscriptionSharingEditorFields: View {
     }
 
     private var memberCountDescription: String {
-        String(format: AppLocalization.string("%d 人（含我）"), draft.memberCount)
+        String(format: AppLocalization.string("%d 人"), draft.memberCount)
     }
 
     private func addMember() {

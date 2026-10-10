@@ -4,7 +4,7 @@ struct AppleIconPickerView: View {
     @Environment(AppServices.self) private var services
     @Environment(\.dismiss) private var dismiss
 
-    let onSelect: (String) -> Void
+    let onSelect: (AppleIconCache.ImportedImageWrite) -> Void
 
     @State private var query: String
     @State private var country = "cn"
@@ -12,9 +12,10 @@ struct AppleIconPickerView: View {
     @State private var isSearching = false
     @State private var selectedResultID: Int64?
     @State private var error: PresentedError?
+    @State private var selectionTask: Task<Void, Never>?
     @FocusState private var isQueryFocused: Bool
 
-    init(initialQuery: String, onSelect: @escaping (String) -> Void) {
+    init(initialQuery: String, onSelect: @escaping (AppleIconCache.ImportedImageWrite) -> Void) {
         _query = State(initialValue: initialQuery)
         self.onSelect = onSelect
     }
@@ -112,6 +113,7 @@ struct AppleIconPickerView: View {
         .frame(width: 720, height: 520, alignment: .top)
         .errorAlert($error)
         .onAppear { isQueryFocused = true }
+        .onDisappear { selectionTask?.cancel() }
     }
 
     private var canSearch: Bool {
@@ -135,11 +137,15 @@ struct AppleIconPickerView: View {
 
     private func select(_ result: AppleIconSearchResult) {
         selectedResultID = result.id
-        Task { @MainActor in
+        selectionTask = Task { @MainActor in
             do {
-                let reference = try await services.appleIconCache.persist(from: result.artworkURL)
-                onSelect(reference)
-                dismiss()
+                let write = try await services.appleIconCache.persistDraftImage(from: result.artworkURL)
+                if Task.isCancelled {
+                    await services.discardUncommittedIcons([write])
+                } else {
+                    onSelect(write)
+                    dismiss()
+                }
             } catch {
                 self.error = PresentedError(error, title: "无法保存 Apple 图标")
                 selectedResultID = nil

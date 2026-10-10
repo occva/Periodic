@@ -130,5 +130,6 @@ private func formattedDecimal(_ value: Decimal, scale: Int) -> String {
     formatter.usesGroupingSeparator = false
     formatter.minimumFractionDigits = scale
     formatter.maximumFractionDigits = scale
+    formatter.roundingMode = .halfUp
     return formatter.string(from: NSDecimalNumber(decimal: value)) ?? "0"
 }

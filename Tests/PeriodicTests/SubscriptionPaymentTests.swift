@@ -471,7 +471,8 @@ struct SubscriptionPaymentTests {
             ]),
             inMemory: true
         )
-        return SubscriptionStore(modelContainer: container)
+        let containerDatabase = DatabaseSession(modelContainer: container)
+        return SubscriptionStore(database: containerDatabase)
     }
 
     private func makeSubscriptionInput(

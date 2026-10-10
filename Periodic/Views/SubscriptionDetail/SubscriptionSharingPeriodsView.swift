@@ -5,6 +5,7 @@ struct SubscriptionSharingPeriodsView: View {
     let periods: [SubscriptionPeriodDTO]
     let isLoading: Bool
     @Binding var isEditing: Bool
+    let onEditCurrentPlan: @MainActor () -> Void
     let addPeriod: @MainActor (SubscriptionPeriodAddInput) async throws -> Void
     let updatePeriod: @MainActor (SubscriptionPeriodUpdateInput) async throws -> Void
     let onSaved: @MainActor () async -> Void
@@ -64,7 +65,9 @@ struct SubscriptionSharingPeriodsView: View {
                     .font(.headline)
                 Spacer()
             } else {
-                Spacer(minLength: 0)
+                Text("周期")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
                 Picker("周期", selection: $state.selection) {
                     if subscription.sharing != nil {
                         Text("当前方案").tag(SubscriptionSharingPeriodSelection.current)
@@ -73,21 +76,39 @@ struct SubscriptionSharingPeriodsView: View {
                         Text(periodTitle(period)).tag(SubscriptionSharingPeriodSelection.period(period.id))
                     }
                 }
+                .labelsHidden()
                 .pickerStyle(.menu)
-                .frame(maxWidth: 300)
-                Button("添加周期") {
-                    state.beginAdding(subscription: subscription, periods: periods)
-                }
-                if let selectedPeriod {
-                    Button("编辑本期") {
-                        state.beginEditing(period: selectedPeriod, expectedRevision: subscription.revision)
+                .frame(width: 320)
+
+                Spacer()
+
+                Menu {
+                    if let selectedPeriod {
+                        Button("编辑本期") {
+                            state.beginEditing(
+                                period: selectedPeriod,
+                                expectedRevision: subscription.revision
+                            )
+                        }
                     }
+                    Button("添加周期") {
+                        state.beginAdding(subscription: subscription, periods: periods)
+                    }
+                    if subscription.sharing != nil {
+                        Divider()
+                        Button("编辑当前方案", action: onEditCurrentPlan)
+                    }
+                } label: {
+                    Label("周期操作", systemImage: "ellipsis.circle")
                 }
+                .fixedSize()
             }
         }
         .buttonStyle(.bordered)
+        .frame(maxWidth: 1200)
         .padding(.horizontal, 24)
         .padding(.vertical, 12)
+        .frame(maxWidth: .infinity)
         .disabled(isLoading || state.isSaving)
     }
 

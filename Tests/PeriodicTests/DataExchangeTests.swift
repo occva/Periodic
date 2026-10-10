@@ -4,6 +4,176 @@ import Testing
 @testable import Periodic
 
 struct DataExchangeTests {
+    @Test(arguments: ["Cafe", " café ", "CAFÉ"])
+    func packagePreservesLegacyDuplicateCategoryNames(name: String) throws {
+        var snapshot = DataPackageSnapshot.empty
+        snapshot.categories = [makeCategory(name: "Cafe"), makeCategory(name: name)]
+        let encoded = try DataPackageCodec.encode(snapshot: snapshot, assets: [:])
+        let decoded = try DataPackageCodec.decode(
+            fileWrapper: DataPackageCodec.fileWrapper(for: encoded)
+        )
+        #expect(decoded.snapshot == snapshot)
+        #expect(decoded.snapshot.categories.map(\.name) == ["Cafe", name])
+    }
+
+    @MainActor
+    @Test func legacyDuplicateCategoriesCanBeExportedAndInspected() async throws {
+        let services = AppServices(inMemory: true)
+        let container = try #require(services.modelContainer)
+        for name in ["影视", " 影视 "] {
+            container.mainContext.insert(TemplateCategoryRecord(input: TemplateCategoryInput(
+                id: UUID(), expectedRevision: nil, name: name
+            )))
+        }
+        try container.mainContext.save()
+        let service = try #require(services.dataExchange)
+        let encoded = try await service.prepareExport()
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try DataPackageCodec.fileWrapper(for: encoded).write(to: directory, options: [], originalContentsURL: nil)
+
+        let plan = try await service.inspect(url: directory)
+
+        #expect(plan.package.snapshot.categories.map(\.name).sorted() == [" 影视 ", "影视"])
+        #expect(try container.mainContext.fetch(FetchDescriptor<TemplateCategoryRecord>()).map(\.name).sorted()
+            == [" 影视 ", "影视"])
+        let choices = DataImportCategoryNames(
+            local: plan.localCategories, imported: plan.package.snapshot.categories,
+            conflictResolution: .keepLocal
+        )
+        #expect(choices.hasUnresolvedNames)
+        let renameID = try #require(plan.package.snapshot.categories.first(where: { $0.name == " 影视 " })?.id)
+        _ = try await service.execute(
+            plan: plan, conflictResolution: .keepLocal, importsSettings: false,
+            categoryNameOverrides: [renameID: "影视归档"]
+        )
+        let exported = try await service.prepareExport()
+        let decoded = try DataPackageCodec.decode(fileWrapper: DataPackageCodec.fileWrapper(for: exported))
+        #expect(decoded.snapshot.categories.map(\.name).sorted() == ["影视", "影视归档"])
+        #expect(Set(decoded.snapshot.categories.map(\.id)) == Set(plan.package.snapshot.categories.map(\.id)))
+    }
+
+    @MainActor
+    @Test(arguments: [DataImportConflictResolution.keepLocal, .useImported])
+    func categoryRenamingPreservesTemplateRelationshipsAndImportIsIdempotent(
+        resolution: DataImportConflictResolution
+    ) async throws {
+        let sourceServices = AppServices(inMemory: true)
+        let sourceContainer = try #require(sourceServices.modelContainer)
+        let firstID = UUID()
+        let secondID = UUID()
+        for (id, name) in [(firstID, "影视"), (secondID, " 影视 ")] {
+            sourceContainer.mainContext.insert(TemplateCategoryRecord(input: TemplateCategoryInput(
+                id: id, expectedRevision: nil, name: name
+            )))
+        }
+        let templateID = UUID()
+        let input = ServiceTemplateInput(
+            id: templateID, expectedRevision: nil, name: "Fixture", aliases: [],
+            category: .other, customCategoryID: secondID, symbolName: "app", iconResourceName: nil,
+            iconURLString: nil, suggestedBillingKind: .lifetime, suggestedCycleMonths: nil,
+            suggestedMoney: nil, currency: .cny
+        )
+        sourceContainer.mainContext.insert(ServiceTemplateRecord(input: input, aliasesData: Data("[]".utf8)))
+        sourceContainer.mainContext.insert(BuiltinTemplateCategoryAssignmentRecord(
+            templateKey: "chatgpt", assignment: .custom(firstID)
+        ))
+        try sourceContainer.mainContext.save()
+        let sourceService = try #require(sourceServices.dataExchange)
+        let encoded = try await sourceService.prepareExport()
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try DataPackageCodec.fileWrapper(for: encoded).write(to: directory, options: [], originalContentsURL: nil)
+        let targetServices = AppServices(inMemory: true)
+        let service = try #require(targetServices.dataExchange)
+        let overrides = [secondID: "影视归档"]
+        let plan = try await service.inspect(url: directory)
+        let firstReceipt = try await service.execute(
+            plan: plan, conflictResolution: resolution, importsSettings: false,
+            categoryNameOverrides: overrides
+        )
+        #expect(firstReceipt.added == 4)
+        let templateStore = try #require(targetServices.templateStore)
+        let template = try #require(try await templateStore.fetchAll().first)
+        #expect(template.customCategoryID == secondID)
+        let roundTrip = try await service.prepareExport()
+        let snapshot = try DataPackageCodec.decode(fileWrapper: DataPackageCodec.fileWrapper(for: roundTrip)).snapshot
+        #expect(snapshot.builtinCategoryAssignments.first?.customCategoryID == firstID)
+        #expect(snapshot.categories.first(where: { $0.id == secondID })?.name == "影视归档")
+        let secondPlan = try await service.inspect(url: directory)
+        let receipt = try await service.execute(
+            plan: secondPlan, conflictResolution: resolution, importsSettings: false,
+            categoryNameOverrides: overrides
+        )
+        #expect(receipt.added == 0)
+        #expect(receipt.updated == 0)
+        #expect(receipt.skipped == 4)
+    }
+
+    @Test func categoryPreviewValidatesBothMergeStrategiesAndUnknownOverrides() throws {
+        let local = makeCategory(name: "影视")
+        let other = makeCategory(name: "音乐")
+        let imported = local.renamed(" 音乐 ")
+        let keepLocal = DataImportCategoryNames(
+            local: [local, other], imported: [imported], conflictResolution: .keepLocal
+        )
+        #expect(!keepLocal.hasUnresolvedNames)
+        let useImported = DataImportCategoryNames(
+            local: [local, other], imported: [imported], conflictResolution: .useImported
+        )
+        #expect(useImported.duplicateIDs == [local.id, other.id])
+        let renamed = DataImportCategoryNames(
+            local: [local, other], imported: [imported], conflictResolution: .useImported,
+            overrides: [local.id: "视频"]
+        )
+        #expect(!renamed.hasUnresolvedNames)
+        #expect(try renamed.validatedCategories().first(where: { $0.id == local.id })?.name == "视频")
+        let invalid = DataImportCategoryNames(
+            local: [local], imported: [], conflictResolution: .keepLocal,
+            overrides: [UUID(): "新名称"]
+        )
+        #expect(invalid.hasUnresolvedNames)
+        #expect(throws: DataExchangeError.self) { try invalid.validatedCategories() }
+    }
+
+    @MainActor
+    @Test(arguments: [DataImportConflictResolution.keepLocal, .useImported])
+    func importRejectsCategoryCollisionsWithoutSavingAnything(
+        resolution: DataImportConflictResolution
+    ) async throws {
+        let container = try makeContainer()
+        let database = DatabaseSession(modelContainer: container)
+        let categories = TemplateCategoryStore(database: database)
+        let exchange = DataExchangeStore(database: database)
+        try await categories.save(TemplateCategoryInput(
+            id: UUID(), expectedRevision: nil, name: "Cafe"
+        ))
+        let before = try await exchange.snapshot()
+        let digest = try await exchange.digest()
+        var imported = makeSnapshot()
+        imported.categories = [makeCategory(name: " CAFÉ ")]
+        await #expect(throws: DataExchangeError.self) {
+            try await exchange.execute(
+                imported: imported,
+                expectedDigest: digest,
+                conflictResolution: resolution
+            )
+        }
+        #expect(try await exchange.snapshot() == before)
+        #expect(try await exchange.digest() == digest)
+    }
+
+    private func makeCategory(name: String) -> DataPackageCategory {
+        DataPackageCategory(
+            recordVersion: 1,
+            id: UUID(),
+            name: name,
+            revision: 1,
+            createdAt: .now,
+            updatedAt: .now
+        )
+    }
+
     @Test func dataPackageRoundTripsAndDetectsTampering() throws {
         let snapshot = makeSnapshot()
         let encoded = try DataPackageCodec.encode(
@@ -187,7 +357,8 @@ struct DataExchangeTests {
         let secondImageData = firstImageData + Data([0])
 
         let sourceContainer = try makeContainer()
-        let sourceSubscriptionStore = SubscriptionStore(modelContainer: sourceContainer)
+        let sourceContainerDatabase = DatabaseSession(modelContainer: sourceContainer)
+        let sourceSubscriptionStore = SubscriptionStore(database: sourceContainerDatabase)
         let input = makeSubscriptionInput()
         _ = try await sourceSubscriptionStore.create(input)
         let subscription = try #require(try await sourceSubscriptionStore.fetchAll().first)
@@ -212,7 +383,7 @@ struct DataExchangeTests {
             )
         )
         let sourceService = DataExchangeService(
-            store: DataExchangeStore(modelContainer: sourceContainer),
+            store: DataExchangeStore(database: sourceContainerDatabase),
             iconCache: AppleIconCache(storageRoot: sourceRoot),
             paymentAttachmentStore: sourceAttachmentStore
         )
@@ -226,7 +397,8 @@ struct DataExchangeTests {
         #expect(decoded.assets[assetIDs[1]] == firstImageData)
 
         let targetContainer = try makeContainer()
-        let targetExchangeStore = DataExchangeStore(modelContainer: targetContainer)
+        let targetContainerDatabase = DatabaseSession(modelContainer: targetContainer)
+        let targetExchangeStore = DataExchangeStore(database: targetContainerDatabase)
         let targetAttachmentStore = PaymentAttachmentStore(storageRoot: targetRoot)
         let targetService = DataExchangeService(
             store: targetExchangeStore,
@@ -247,7 +419,7 @@ struct DataExchangeTests {
         )
 
         let importedPayment = try #require(
-            try await SubscriptionStore(modelContainer: targetContainer)
+            try await SubscriptionStore(database: targetContainerDatabase)
                 .fetchPayments(for: subscription.id)
                 .first
         )
@@ -335,7 +507,8 @@ struct DataExchangeTests {
             reminderMinuteOfDay: nil
         )
         let container = try makeContainer()
-        let store = DataExchangeStore(modelContainer: container)
+        let containerDatabase = DatabaseSession(modelContainer: container)
+        let store = DataExchangeStore(database: containerDatabase)
         let targetDigest = try await store.digest()
 
         _ = try await store.execute(
@@ -352,7 +525,8 @@ struct DataExchangeTests {
     @MainActor
     @Test func mergeImportIsAtomicAndBecomesIdempotent() async throws {
         let sourceContainer = try makeContainer()
-        let sourceStore = SubscriptionStore(modelContainer: sourceContainer)
+        let sourceContainerDatabase = DatabaseSession(modelContainer: sourceContainer)
+        let sourceStore = SubscriptionStore(database: sourceContainerDatabase)
         let subscriptionInput = makeSubscriptionInput()
         _ = try await sourceStore.create(subscriptionInput)
         let subscription = try #require(try await sourceStore.fetchAll().first)
@@ -409,10 +583,11 @@ struct DataExchangeTests {
             )
         )
         try sourceContainer.mainContext.save()
-        let imported = try await DataExchangeStore(modelContainer: sourceContainer).snapshot()
+        let imported = try await DataExchangeStore(database: sourceContainerDatabase).snapshot()
 
         let targetContainer = try makeContainer()
-        let exchangeStore = DataExchangeStore(modelContainer: targetContainer)
+        let targetContainerDatabase = DatabaseSession(modelContainer: targetContainer)
+        let exchangeStore = DataExchangeStore(database: targetContainerDatabase)
         let targetDigest = try await exchangeStore.digest()
         let firstPreview = try await exchangeStore.preview(imported: imported)
         #expect(firstPreview.subscriptions.additions == 1)
@@ -445,9 +620,10 @@ struct DataExchangeTests {
     @MainActor
     @Test func importPlanRejectsTargetChangesAfterPreview() async throws {
         let container = try makeContainer()
-        let exchangeStore = DataExchangeStore(modelContainer: container)
+        let containerDatabase = DatabaseSession(modelContainer: container)
+        let exchangeStore = DataExchangeStore(database: containerDatabase)
         let originalDigest = try await exchangeStore.digest()
-        let subscriptionStore = SubscriptionStore(modelContainer: container)
+        let subscriptionStore = SubscriptionStore(database: containerDatabase)
         _ = try await subscriptionStore.create(makeSubscriptionInput())
 
         await #expect(throws: DataExchangeError.self) {
@@ -463,8 +639,9 @@ struct DataExchangeTests {
     @MainActor
     @Test func importedHistoryAdvancesExistingOwnerRevisionOnlyWhenChanged() async throws {
         let container = try makeContainer()
-        let subscriptionStore = SubscriptionStore(modelContainer: container)
-        let exchangeStore = DataExchangeStore(modelContainer: container)
+        let containerDatabase = DatabaseSession(modelContainer: container)
+        let subscriptionStore = SubscriptionStore(database: containerDatabase)
+        let exchangeStore = DataExchangeStore(database: containerDatabase)
         let input = makeSubscriptionInput()
         _ = try await subscriptionStore.create(input)
         let original = try await subscriptionStore.fetchDetail(for: input.id)
@@ -569,13 +746,15 @@ struct DataExchangeTests {
     @MainActor
     @Test func importingCurrentFieldsAndHistoryAdvancesOwnerRevisionOnce() async throws {
         let sourceContainer = try makeContainer()
+        let sourceContainerDatabase = DatabaseSession(modelContainer: sourceContainer)
         let targetContainer = try makeContainer()
-        let sourceStore = SubscriptionStore(modelContainer: sourceContainer)
-        let targetStore = SubscriptionStore(modelContainer: targetContainer)
+        let targetContainerDatabase = DatabaseSession(modelContainer: targetContainer)
+        let sourceStore = SubscriptionStore(database: sourceContainerDatabase)
+        let targetStore = SubscriptionStore(database: targetContainerDatabase)
         let input = makeSubscriptionInput()
         _ = try await sourceStore.create(input)
-        let exchangeStore = DataExchangeStore(modelContainer: targetContainer)
-        let original = try await DataExchangeStore(modelContainer: sourceContainer).snapshot()
+        let exchangeStore = DataExchangeStore(database: targetContainerDatabase)
+        let original = try await DataExchangeStore(database: sourceContainerDatabase).snapshot()
         _ = try await exchangeStore.execute(
             imported: original,
             expectedDigest: try await exchangeStore.digest(),
@@ -598,7 +777,7 @@ struct DataExchangeTests {
             ),
             expectedSubscriptionRevision: 2
         ))
-        let imported = try await DataExchangeStore(modelContainer: sourceContainer).snapshot()
+        let imported = try await DataExchangeStore(database: sourceContainerDatabase).snapshot()
         _ = try await exchangeStore.execute(
             imported: imported,
             expectedDigest: try await exchangeStore.digest(),
@@ -646,9 +825,10 @@ struct DataExchangeTests {
         defer { try? FileManager.default.removeItem(at: storageRoot) }
 
         let container = try makeContainer()
-        let store = DataExchangeStore(modelContainer: container)
+        let containerDatabase = DatabaseSession(modelContainer: container)
+        let store = DataExchangeStore(database: containerDatabase)
         let targetDigest = try await store.digest()
-        _ = try await SubscriptionStore(modelContainer: container).create(makeSubscriptionInput())
+        _ = try await SubscriptionStore(database: containerDatabase).create(makeSubscriptionInput())
 
         let imageData = try #require(Data(base64Encoded: Self.onePixelPNG))
         let identifier = DataPackageCodec.sha256(imageData)

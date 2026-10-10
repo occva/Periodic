@@ -618,7 +618,8 @@ struct SubscriptionDomainTests {
             ]),
             inMemory: true
         )
-        let store = SubscriptionStore(modelContainer: container)
+        let containerDatabase = DatabaseSession(modelContainer: container)
+        let store = SubscriptionStore(database: containerDatabase)
         let expiry = LocalDate.today
         let input = SubscriptionCreateInput(
             id: UUID(),
@@ -684,7 +685,8 @@ struct SubscriptionDomainTests {
             schema: Schema([SubscriptionSharingRecord.self, SubscriptionRecord.self, SubscriptionPeriodRecord.self]),
             inMemory: true
         )
-        let store = SubscriptionStore(modelContainer: container)
+        let containerDatabase = DatabaseSession(modelContainer: container)
+        let store = SubscriptionStore(database: containerDatabase)
         let expiry = LocalDate.today
         let input = SubscriptionCreateInput(
             id: UUID(),
@@ -785,6 +787,7 @@ struct SubscriptionDomainTests {
             schema: Schema([SubscriptionSharingRecord.self, SubscriptionRecord.self]),
             inMemory: true
         )
+        let containerDatabase = DatabaseSession(modelContainer: container)
         let validInput = SubscriptionCreateInput(
             id: UUID(),
             name: "Valid",
@@ -809,11 +812,13 @@ struct SubscriptionDomainTests {
         container.mainContext.insert(valid)
         container.mainContext.insert(invalid)
         try container.mainContext.save()
-        let store = SubscriptionStore(modelContainer: container)
+        let store = SubscriptionStore(database: containerDatabase)
 
-        let subscriptions = try await store.fetchAll()
+        let result = try await store.loadSubscriptions()
 
-        #expect(subscriptions.map(\.name) == ["Valid"])
+        #expect(result.subscriptions.map(\.name) == ["Valid"])
+        #expect(result.invalidRecordCount == 1)
+        await #expect(throws: SubscriptionLoadError.self) { try await store.fetchAll() }
     }
 
     @MainActor
@@ -823,7 +828,8 @@ struct SubscriptionDomainTests {
             schema: Schema([SubscriptionSharingRecord.self, SubscriptionRecord.self, SubscriptionPeriodRecord.self]),
             inMemory: true
         )
-        let store = SubscriptionStore(modelContainer: container)
+        let containerDatabase = DatabaseSession(modelContainer: container)
+        let store = SubscriptionStore(database: containerDatabase)
         let input = SubscriptionCreateInput(
             id: UUID(),
             name: "哔哩哔哩",
@@ -876,14 +882,16 @@ struct SubscriptionDomainTests {
             let container = try controller.makeContainer(
                 schema: Schema([SubscriptionSharingRecord.self, SubscriptionRecord.self, SubscriptionPeriodRecord.self])
             )
-            let store = SubscriptionStore(modelContainer: container)
+            let containerDatabase = DatabaseSession(modelContainer: container)
+            let store = SubscriptionStore(database: containerDatabase)
             _ = try await store.create(input)
         }
 
         let reopened = try controller.makeContainer(
             schema: Schema([SubscriptionSharingRecord.self, SubscriptionRecord.self, SubscriptionPeriodRecord.self])
         )
-        let reopenedStore = SubscriptionStore(modelContainer: reopened)
+        let reopenedDatabase = DatabaseSession(modelContainer: reopened)
+        let reopenedStore = SubscriptionStore(database: reopenedDatabase)
         let records = try await reopenedStore.fetchAll()
         #expect(records.map(\.id) == [input.id])
         #expect(records.first?.billingKind == .lifetime)
@@ -900,7 +908,8 @@ struct SubscriptionDomainTests {
             schema: Schema([SubscriptionSharingRecord.self, SubscriptionRecord.self, SubscriptionPeriodRecord.self]),
             inMemory: true
         )
-        let store = SubscriptionStore(modelContainer: container)
+        let containerDatabase = DatabaseSession(modelContainer: container)
+        let store = SubscriptionStore(database: containerDatabase)
         let subscriptionID = UUID()
         let initialStart = LocalDate.today
         let initial = SubscriptionCreateInput(
@@ -987,6 +996,7 @@ struct SubscriptionDomainTests {
             schema: Schema([SubscriptionSharingRecord.self, SubscriptionRecord.self, SubscriptionPeriodRecord.self]),
             inMemory: true
         )
+        let containerDatabase = DatabaseSession(modelContainer: container)
         let subscriptionID = UUID()
         let input = SubscriptionCreateInput(
             id: subscriptionID,
@@ -1006,7 +1016,7 @@ struct SubscriptionDomainTests {
         )
         container.mainContext.insert(SubscriptionRecord(input: input))
         try container.mainContext.save()
-        let store = SubscriptionStore(modelContainer: container)
+        let store = SubscriptionStore(database: containerDatabase)
 
         #expect(try await store.backfillLifetimePeriods() == 1)
         #expect(try await store.backfillLifetimePeriods() == 0)
@@ -1022,6 +1032,7 @@ struct SubscriptionDomainTests {
             schema: Schema([SubscriptionSharingRecord.self, SubscriptionRecord.self, SubscriptionPeriodRecord.self]),
             inMemory: true
         )
+        let containerDatabase = DatabaseSession(modelContainer: container)
         let subscriptionID = UUID()
         let createdAt = Date(timeIntervalSince1970: 1_705_000_000)
         let original = SubscriptionCreateInput(
@@ -1042,7 +1053,7 @@ struct SubscriptionDomainTests {
         )
         container.mainContext.insert(SubscriptionRecord(input: original, now: createdAt))
         try container.mainContext.save()
-        let store = SubscriptionStore(modelContainer: container)
+        let store = SubscriptionStore(database: containerDatabase)
         let lifetime = SubscriptionCreateInput(
             id: subscriptionID,
             name: original.name,
@@ -1078,6 +1089,7 @@ struct SubscriptionDomainTests {
             schema: Schema([SubscriptionSharingRecord.self, SubscriptionRecord.self, SubscriptionPeriodRecord.self]),
             inMemory: true
         )
+        let containerDatabase = DatabaseSession(modelContainer: container)
         let validID = UUID()
         let invalidID = UUID()
         let existingPeriodID = UUID()
@@ -1126,7 +1138,7 @@ struct SubscriptionDomainTests {
             )
         )
         try container.mainContext.save()
-        let store = SubscriptionStore(modelContainer: container)
+        let store = SubscriptionStore(database: containerDatabase)
 
         #expect(try await store.backfillLifetimePeriods() == 2)
         #expect(try await store.backfillLifetimePeriods() == 0)
@@ -1149,7 +1161,8 @@ struct SubscriptionDomainTests {
             schema: Schema([ServiceTemplateRecord.self]),
             inMemory: true
         )
-        let store = TemplateStore(modelContainer: container)
+        let containerDatabase = DatabaseSession(modelContainer: container)
+        let store = TemplateStore(database: containerDatabase)
         let id = UUID()
         let initial = ServiceTemplateInput(
             id: id,
@@ -1172,6 +1185,8 @@ struct SubscriptionDomainTests {
         #expect(created.key == .user(id))
         #expect(created.aliases == ["OpenAI"])
         #expect(created.iconResourceName == "chatgpt.jpg")
+        let originalIconURL = try #require(initial.iconURLString)
+        #expect(created.iconURLString == "apple-icon:" + DataPackageCodec.sha256(Data(originalIconURL.utf8)))
         #expect(created.revision == 1)
 
         let updated = ServiceTemplateInput(
@@ -1209,9 +1224,10 @@ struct SubscriptionDomainTests {
             ]),
             inMemory: true
         )
-        let categoryStore = TemplateCategoryStore(modelContainer: container)
-        let templateStore = TemplateStore(modelContainer: container)
-        let builtinCategoryStore = BuiltinTemplateCategoryStore(modelContainer: container)
+        let containerDatabase = DatabaseSession(modelContainer: container)
+        let categoryStore = TemplateCategoryStore(database: containerDatabase)
+        let templateStore = TemplateStore(database: containerDatabase)
+        let builtinCategoryStore = BuiltinTemplateCategoryStore(database: containerDatabase)
         let categoryID = UUID()
 
         try await categoryStore.save(
@@ -1284,6 +1300,7 @@ struct SubscriptionDomainTests {
             schema: Schema([BuiltinTemplateCategoryAssignmentRecord.self]),
             inMemory: true
         )
+        let containerDatabase = DatabaseSession(modelContainer: container)
         let valid = BuiltinTemplateCategoryAssignmentRecord(
             templateKey: "chatgpt",
             assignment: .builtin(.tools)
@@ -1296,7 +1313,7 @@ struct SubscriptionDomainTests {
         container.mainContext.insert(valid)
         container.mainContext.insert(invalid)
         try container.mainContext.save()
-        let store = BuiltinTemplateCategoryStore(modelContainer: container)
+        let store = BuiltinTemplateCategoryStore(database: containerDatabase)
 
         let assignments = try await store.fetchAssignments()
 

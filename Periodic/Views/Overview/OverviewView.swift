@@ -458,7 +458,6 @@ struct OverviewView: View {
                 let outcome = try await services.deleteSubscriptions(preview)
                 selection.subtract(preview.targets.map(\.id))
                 deletionPreview = nil
-                await session.reload(using: services)
                 if outcome.pendingIconCleanupCount > 0
                     || outcome.pendingPaymentAttachmentCleanupCount > 0 {
                     self.error = PresentedError(
@@ -538,7 +537,6 @@ struct OverviewView: View {
                     state,
                     targets: targets
                 )
-                await session.reload(using: services)
             } catch {
                 self.error = PresentedError(error, title: "无法更新订阅状态")
             }

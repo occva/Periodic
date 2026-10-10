@@ -31,6 +31,17 @@ actor DataExchangeService {
         try await store.referencedIconReferences()
     }
 
+    func migrateLegacyIconReferences() async throws -> Bool {
+        let references = try await store.referencedIconReferences()
+        let legacyReferences = references.filter {
+            StoredIconReference.normalized($0) != $0
+        }
+        for reference in legacyReferences.sorted() {
+            try await iconCache.prepareStoredImage(for: reference)
+        }
+        return try await store.normalizeIconReferences(legacyReferences)
+    }
+
     func prepareExport() async throws -> EncodedDataPackage {
         var snapshot = try await store.snapshot()
         snapshot.settings = settingsSnapshot()
@@ -91,7 +102,8 @@ actor DataExchangeService {
         for data in package.assets.values {
             try await iconCache.validateImportedImage(data)
         }
-        let targetDigest = try await store.digest()
+        let localSnapshot = try await store.snapshot()
+        let targetDigest = DataPackageCodec.sha256(try DataPackageCodec.canonicalSnapshotData(localSnapshot))
         let comparisonSnapshot = try await snapshotResolvingKnownAssets(package)
         let basePreview = try await store.preview(imported: comparisonSnapshot)
         let preview = DataImportPreview(
@@ -108,7 +120,8 @@ actor DataExchangeService {
             package: package,
             targetDigest: targetDigest,
             preview: preview,
-            expiresAt: Date().addingTimeInterval(15 * 60)
+            expiresAt: Date().addingTimeInterval(15 * 60),
+            localCategories: localSnapshot.categories
         )
     }
 
@@ -152,7 +165,8 @@ actor DataExchangeService {
     func execute(
         plan: DataImportPlan,
         conflictResolution: DataImportConflictResolution,
-        importsSettings: Bool
+        importsSettings: Bool,
+        categoryNameOverrides: [UUID: String] = [:]
     ) async throws -> DataImportReceipt {
         guard plan.expiresAt > Date() else { throw DataExchangeError.planExpired }
         let iconAssetIdentifiers = Set(
@@ -213,7 +227,8 @@ actor DataExchangeService {
             receipt = try await store.execute(
                 imported: snapshot,
                 expectedDigest: plan.targetDigest,
-                conflictResolution: conflictResolution
+                conflictResolution: conflictResolution,
+                categoryNameOverrides: categoryNameOverrides
             )
         } catch {
             await discardUncommittedImages(iconWrites: iconWrites, paymentWrites: paymentWrites)

@@ -1,8 +1,179 @@
 import Foundation
+import CryptoKit
 import Testing
 @testable import Periodic
 
 struct AppleIconCacheTests {
+    @Test func selectingUpdatedAppleImageStagesNewBytesWithoutChangingTheSavedImage() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let image = try #require(Data(base64Encoded: Self.onePixelPNG))
+        let updatedImage = image + Data([0])
+        let url = try #require(URL(string: "https://example.mzstatic.com/unchanged.png"))
+        let response = try #require(HTTPURLResponse(
+            url: url, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "image/png"]
+        ))
+        let firstCache = AppleIconCache(storageRoot: directory, download: { _ in (image, response) })
+        let savedReference = try await firstCache.persist(from: url)
+        let cache = AppleIconCache(storageRoot: directory, download: { _ in (updatedImage, response) })
+
+        let draft = try await cache.persistDraftImage(from: url)
+
+        #expect(draft.reference != savedReference)
+        #expect(try await cache.data(for: draft.reference) == updatedImage)
+        #expect(try await cache.data(for: savedReference) == image)
+        await cache.discardImportedImages([draft], keeping: [savedReference])
+        #expect(try await cache.data(for: savedReference) == image)
+        await #expect(throws: AppleIconCache.CacheError.self) { try await cache.data(for: draft.reference) }
+    }
+
+    @Test func selectingAppleImageRepairsACorruptedStoredFileWithoutOverwritingItInTheDraft() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let image = try #require(Data(base64Encoded: Self.onePixelPNG))
+        let url = try #require(URL(string: "https://example.mzstatic.com/corrupt.png"))
+        let response = try #require(HTTPURLResponse(
+            url: url, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "image/png"]
+        ))
+        let cache = AppleIconCache(storageRoot: directory, download: { _ in (image, response) })
+        let originalReference = try await cache.persist(from: url)
+        let key = try #require(StoredIconReference(rawValue: originalReference)).key
+        let file = directory.appending(path: "AppleServiceIcons").appending(path: key + ".image")
+        let corrupt = Data("corrupt".utf8)
+        try corrupt.write(to: file)
+
+        let repaired = try await cache.persistDraftImage(from: url)
+
+        #expect(repaired.reference != originalReference)
+        #expect(try Data(contentsOf: file) == corrupt)
+        #expect(try await cache.data(for: repaired.reference) == image)
+        await cache.releaseImportedImages([repaired])
+        #expect(try await cache.data(for: repaired.reference) == image)
+    }
+
+    @Test func selectingIdenticalAppleBytesRepairsACorruptedContentFileAndProtectsCommittedDrafts() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let image = try #require(Data(base64Encoded: Self.onePixelPNG))
+        let url = try #require(URL(string: "https://example.mzstatic.com/content-corrupt.png"))
+        let response = try #require(HTTPURLResponse(
+            url: url, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "image/png"]
+        ))
+        let cache = AppleIconCache(storageRoot: directory, download: { _ in (image, response) })
+        let original = try await cache.persist(from: url)
+        let key = try #require(StoredIconReference(rawValue: original)).key
+        let file = directory.appending(path: "AppleServiceIcons").appending(path: key + ".image")
+        let corrupt = Data("corrupt".utf8)
+        try corrupt.write(to: file)
+
+        let replacement = try await cache.persistDraftImage(from: url)
+        #expect(replacement.reference != original)
+        #expect(try Data(contentsOf: file) == corrupt)
+        #expect(try await cache.data(for: replacement.reference) == image)
+        await cache.releaseImportedImages([replacement])
+        let anotherDraft = try await cache.persistDraftImage(from: url)
+        await cache.discardImportedImages([anotherDraft], keeping: [original, replacement.reference])
+        #expect(try await cache.data(for: replacement.reference) == image)
+    }
+
+    @Test func explicitStorageRootKeepsLegacyImagesInTheSameStorageScope() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let legacy = directory.appending(path: "LegacyAppleServiceIcons")
+        try FileManager.default.createDirectory(at: legacy, withIntermediateDirectories: true)
+        let reference = "https://example.mzstatic.com/" + UUID().uuidString + ".png"
+        let key = SHA256.hash(data: Data(reference.utf8))
+            .map { String(format: "%02x", $0) }.joined()
+        let data = try #require(Data(base64Encoded: Self.onePixelPNG))
+        try data.write(to: legacy.appending(path: key).appendingPathExtension("image"))
+        let cache = AppleIconCache(storageRoot: directory)
+
+        #expect(try await cache.data(for: reference) == data)
+        #expect(await cache.removeStoredImages(references: [reference]).isEmpty)
+        await #expect(throws: AppleIconCache.CacheError.self) {
+            try await cache.data(for: reference)
+        }
+    }
+
+    @Test func cleanupDoesNotDeleteAnIconCommittedAfterTheReferenceCheck() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cache = AppleIconCache(storageRoot: directory)
+        let data = try #require(Data(base64Encoded: Self.onePixelPNG))
+        let write = try await cache.persistImportedImage(data)
+        let checkpoint = await cache.cleanupCheckpoint()
+        await cache.releaseImportedImages([write])
+        let failures = await cache.removeStoredImages(
+            references: [write.reference], protectedSince: checkpoint
+        )
+        #expect(failures == [write.reference])
+        #expect(try await cache.data(for: write.reference) == data)
+    }
+
+    @Test func cancelledDraftKeepsAnotherDraftsIconUntilItsOwnerDiscards() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cache = AppleIconCache(storageRoot: directory)
+        let data = try #require(Data(base64Encoded: Self.onePixelPNG))
+        let source = directory.appending(path: "source.png")
+        try data.write(to: source)
+        let first = try await cache.persistDraftLocalImage(from: source)
+        let second = try await cache.persistDraftLocalImage(from: source)
+        await cache.discardImportedImages([first])
+        #expect(try await cache.data(for: second.reference) == data)
+        await cache.discardImportedImages([second])
+        await #expect(throws: AppleIconCache.CacheError.self) {
+            try await cache.data(for: second.reference)
+        }
+    }
+
+    @Test func orphanScanProtectsReferencedAndLeasedIcons() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cache = AppleIconCache(
+            storageRoot: directory,
+            legacyStorageRoot: directory.appending(path: "Legacy")
+        )
+        let data = try #require(Data(base64Encoded: Self.onePixelPNG))
+        let write = try await cache.persistImportedImage(data)
+        _ = await cache.removeUnreferencedImages(keeping: [], modifiedBefore: .distantFuture)
+        #expect(try await cache.data(for: write.reference) == data)
+        await cache.releaseImportedImages([write])
+        _ = await cache.removeUnreferencedImages(
+            keeping: [write.reference], modifiedBefore: .distantFuture
+        )
+        #expect(try await cache.data(for: write.reference) == data)
+        _ = await cache.removeUnreferencedImages(keeping: [], modifiedBefore: .distantFuture)
+        await #expect(throws: AppleIconCache.CacheError.self) {
+            try await cache.data(for: write.reference)
+        }
+    }
+
+    @Test func legacyAppleReferenceIsPreservedByScanAndRemovedFromBothLocations() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let legacy = directory.appending(path: "Legacy")
+        try FileManager.default.createDirectory(at: legacy, withIntermediateDirectories: true)
+        let reference = "https://example.mzstatic.com/legacy-icon.png"
+        let key = SHA256.hash(data: Data(reference.utf8))
+            .map { String(format: "%02x", $0) }.joined()
+        let source = legacy.appending(path: key).appendingPathExtension("image")
+        let data = try #require(Data(base64Encoded: Self.onePixelPNG))
+        try data.write(to: source)
+        let cache = AppleIconCache(storageRoot: directory, legacyStorageRoot: legacy)
+        #expect(try await cache.data(for: reference) == data)
+        _ = await cache.removeUnreferencedImages(
+            keeping: [reference], modifiedBefore: .distantFuture
+        )
+        #expect(try await cache.data(for: reference) == data)
+        #expect(await cache.removeStoredImages(references: [reference]).isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: source.path))
+        await #expect(throws: AppleIconCache.CacheError.self) {
+            try await cache.data(for: reference)
+        }
+    }
+
     @MainActor
     @Test func inMemoryServicesUseAnIsolatedTemporaryIconRoot() throws {
         let temporaryDirectory = FileManager.default.temporaryDirectory
