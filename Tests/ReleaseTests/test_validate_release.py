@@ -64,6 +64,7 @@ class ReleaseValidationTests(unittest.TestCase):
             "<channel><item><sparkle:version>1</sparkle:version>"
             "<sparkle:shortVersionString>1.0.0</sparkle:shortVersionString>"
             "<sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>"
+            "<sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>"
             f"<enclosure {attributes_text}/></item></channel></rss>"
         )
 
@@ -127,6 +128,17 @@ class ReleaseValidationTests(unittest.TestCase):
             with self.subTest(build=build):
                 with self.assertRaisesRegex(ValueError, "greater than"):
                     release.validate_next_build(self.feed, build)
+
+    def test_rejects_missing_or_incorrect_hardware_requirement(self):
+        for replacement in ["", "<sparkle:hardwareRequirements>x86_64</sparkle:hardwareRequirements>"]:
+            with self.subTest(replacement=replacement):
+                self.write_feed()
+                self.feed.write_text(self.feed.read_text().replace(
+                    "<sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>",
+                    replacement
+                ))
+                with self.assertRaisesRegex(ValueError, "Apple silicon"):
+                    release.validate_appcast(self.feed, self.dmg, "1.0.0", "1")
 
     def test_rejects_previous_feed_without_numeric_build_number(self):
         for version in ["", "1.0.0"]:

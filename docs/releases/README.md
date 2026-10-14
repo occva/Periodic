@@ -54,6 +54,8 @@ build/DerivedData/SourcePackages/artifacts/sparkle/Sparkle/bin/generate_keys --a
 
 1.0.0 无 Developer ID 凭据，使用临时代码签名分发，未经 Apple 公证。更新包和 feed 仍必须使用 Sparkle 私钥签名。这两类签名职责不同：Sparkle 签名验证更新来源，不替代 Apple 首次打开时的信任判断。
 
+临时签名模式关闭 Hardened Runtime，并按从内到外的顺序为 Sparkle 辅助程序、XPC、框架和主应用统一临时签名，保留各自 entitlements 和 App Sandbox。避免主程序无团队签名、框架保留第三方团队签名造成启动或安装器通信失败。
+
 前提：Sparkle 签名私钥与仓库公钥匹配；工作区干净，版本号和递增构建号已提交；发布时 HEAD 等于 GitHub `origin/main`。发布说明必须明确注明“未经 Apple 公证”。
 
 ```bash

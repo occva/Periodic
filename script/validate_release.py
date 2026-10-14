@@ -51,6 +51,8 @@ def validate_appcast(feed, dmg, version, build):
         raise ValueError("Appcast marketing version does not match.")
     if item.findtext(namespace + "minimumSystemVersion") != "26.0":
         raise ValueError("Appcast must require macOS 26.0.")
+    if item.findtext(namespace + "hardwareRequirements") != "arm64":
+        raise ValueError("Appcast must require Apple silicon (arm64).")
     enclosure = item.find("enclosure")
     if enclosure is None:
         raise ValueError("Appcast has no update archive.")

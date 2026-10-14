@@ -80,8 +80,20 @@ XCODE_OPTIONS=(
 )
 
 if [[ "$IS_NOTARIZED" == false ]]; then
-  xcodebuild "${XCODE_OPTIONS[@]}" CODE_SIGN_IDENTITY=- build
+  xcodebuild "${XCODE_OPTIONS[@]}" CODE_SIGN_IDENTITY=- ENABLE_HARDENED_RUNTIME=NO build
   APP="$DERIVED_DATA/Build/Products/Release/Periodic.app"
+  FRAMEWORK="$APP/Contents/Frameworks/Sparkle.framework"
+  # All nested code needs the same signing policy for library loading and XPC.
+  for component in \
+    "$FRAMEWORK/Autoupdate" \
+    "$FRAMEWORK/Updater.app" \
+    "$FRAMEWORK/XPCServices/Downloader.xpc" \
+    "$FRAMEWORK/XPCServices/Installer.xpc" \
+    "$FRAMEWORK" \
+    "$APP"; do
+    codesign --force --sign - --timestamp=none \
+      --preserve-metadata=identifier,entitlements "$component"
+  done
 else
   xcodebuild "${XCODE_OPTIONS[@]}" \
     "CODE_SIGN_IDENTITY=$SIGNING_IDENTITY" "DEVELOPMENT_TEAM=$TEAM_ID" \
