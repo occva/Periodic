@@ -16,8 +16,8 @@ struct DataSettingsView: View {
                 }
 
                 HStack {
-                    Button("导入数据…") { feature.requestImport() }
-                    Button("导出完整备份…") {
+                    Button("导入数据") { feature.requestImport() }
+                    Button("导出完整备份") {
                         feature.requestExport(
                             using: services.dataExchange,
                             terminationGuard: services.terminationGuard

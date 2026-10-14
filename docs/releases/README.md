@@ -2,7 +2,7 @@
 
 ## 版本事实
 
-- `Configurations/Base.xcconfig` 中 `MARKETING_VERSION = 1.0.0` 是展示版本；`CURRENT_PROJECT_VERSION = 1` 是更新排序使用的构建号。
+- `Configurations/Base.xcconfig` 中 `MARKETING_VERSION = 1.0.1` 是展示版本；`CURRENT_PROJECT_VERSION = 2` 是更新排序使用的构建号。
 - 每次正式发布必须递增构建号，即使展示版本的层级或编号发生变化，也不能复用旧构建号。
 - 不改动 bundle identifier、SwiftData 迁移版本、正式数据库或资源目录。更新替换应用包，原本的数据库迁移入口继续负责打开用户数据。
 - 1.0.0 是包含更新器的首个版本；此前从源码运行的 0.1.0 没有更新器，需要手动安装 DMG。
@@ -16,6 +16,8 @@
 `ApplicationTerminationGuard` 保护关闭弹窗后仍在执行的数据导入、读取与导出准备。操作开始时同步登记，成功或失败后均释放；更新同时等待全部操作和弹窗结束。签名 feed 验证失败不进行超时降级，发布私钥必须妥善备份。
 
 默认关闭自动检查、自动下载安装和系统信息收集。用户可主动开启自动检查和自动下载安装；后者在退出应用时安装，手动确认安装则立即重启。Sparkle 自己保存更新偏好，业务设置不重复维护另一份状态。检查与下载仅访问 GitHub 发布服务，不附加订阅、付款或其他业务数据。
+
+更新设置正常状态仅展示当前版本、检查更新、上次检查及两个更新开关。构建号继续用于更新排序，签名、重启和隐私行为在本文档说明，不作为设置页面常驻说明行；更新不可用、错误和等待重启时仍显示必要提示。
 
 安装引导只在 DMG Finder 窗口展示：Periodic 在左，Applications 链接在右，背景上有拖拽提示和箭头。设置内不提供安装教程。`script/create_dmg.sh` 使用原生 AppKit 绘制背景，通过 Finder 保存窗口布局，不引入运行时依赖。打包机器需要运行图形会话，并允许终端控制 Finder。
 
@@ -48,11 +50,11 @@ build/DerivedData/SourcePackages/artifacts/sparkle/Sparkle/bin/generate_keys --a
 ./script/release.sh --local
 ```
 
-`--local` 构建仅包含 arm64 的 Release 应用并检查版本、更新配置、框架组件和代码签名，生成 `dist/1.0.0-local/Periodic-1.0.0-local.dmg`。它不会公证、生成公开 appcast 或发布 GitHub Release。可用于本地检查包结构与安装引导。
+`--local` 构建仅包含 arm64 的 Release 应用并检查版本、更新配置、框架组件和代码签名，生成 `dist/1.0.1-local/Periodic-1.0.1-local.dmg`。它不会公证、生成公开 appcast 或发布 GitHub Release。可用于本地检查包结构与安装引导。
 
 ## 未公证版本打包与发布
 
-1.0.0 无 Developer ID 凭据，使用临时代码签名分发，未经 Apple 公证。更新包和 feed 仍必须使用 Sparkle 私钥签名。这两类签名职责不同：Sparkle 签名验证更新来源，不替代 Apple 首次打开时的信任判断。
+1.0.0 与 1.0.1 无 Developer ID 凭据，使用临时代码签名分发，未经 Apple 公证。更新包和 feed 仍必须使用 Sparkle 私钥签名。这两类签名职责不同：Sparkle 签名验证更新来源，不替代 Apple 首次打开时的信任判断。
 
 临时签名模式关闭 Hardened Runtime，并按从内到外的顺序为 Sparkle 辅助程序、XPC、框架和主应用统一临时签名，保留各自 entitlements 和 App Sandbox。避免主程序无团队签名、框架保留第三方团队签名造成启动或安装器通信失败。
 
@@ -62,7 +64,7 @@ build/DerivedData/SourcePackages/artifacts/sparkle/Sparkle/bin/generate_keys --a
 # 生成正式包与签名 feed
 ./script/release.sh --unnotarized
 
-# 完成校验后公开发布 v1.0.0
+# 完成校验后公开发布 v1.0.1
 ./script/release.sh --unnotarized --publish
 ```
 
@@ -80,7 +82,7 @@ export NOTARYTOOL_PROFILE='Periodic-notary'
 # 只生成正式包，不发布
 ./script/release.sh
 
-# 完成相同校验后公开发布 v1.0.0
+# 完成相同校验后公开发布 v1.0.1
 ./script/release.sh --publish
 ```
 

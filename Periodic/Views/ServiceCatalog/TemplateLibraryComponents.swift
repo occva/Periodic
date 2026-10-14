@@ -64,6 +64,8 @@ struct TemplateLibrarySidebar: View {
             }
         }
         .listStyle(.sidebar)
+        .scrollContentBackground(.hidden)
+        .background(Color(nsColor: .controlBackgroundColor))
         .accessibilityIdentifier("template-library-sidebar")
     }
 
@@ -80,6 +82,7 @@ struct TemplateLibrarySidebar: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
+        .listItemTint(Color.accentColor)
         .tag(selection)
         .dropDestination(for: String.self) { templateIDs, _ in
             guard selection.categoryAssignment != nil,

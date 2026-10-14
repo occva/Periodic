@@ -163,7 +163,7 @@ struct SubscriptionEditorView: View {
                             iconResourceName = nil
                             iconURLString = write.reference
                         }
-                        Button("Apple 搜索…") { isPresentingIconPicker = true }
+                        Button("Apple 搜索") { isPresentingIconPicker = true }
                             .accessibilityIdentifier("search-apple-icon")
                     }
                 }

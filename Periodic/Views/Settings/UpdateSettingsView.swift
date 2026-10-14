@@ -11,11 +11,6 @@ struct UpdateSettingsView: View {
                 } label: {
                     Text("当前版本", tableName: "Updates")
                 }
-                LabeledContent {
-                    Text(verbatim: AppReleaseInfo.current.build)
-                } label: {
-                    Text("构建版本", tableName: "Updates")
-                }
                 Button(action: updates.checkForUpdates) {
                     Text("检查更新…", tableName: "Updates")
                 }
@@ -24,7 +19,7 @@ struct UpdateSettingsView: View {
                 if let error = updates.startupError {
                     Text(error.message)
                         .foregroundStyle(.secondary)
-                } else {
+                } else if updates.availability != .available {
                     availabilityDescription
                         .foregroundStyle(.secondary)
                 }
@@ -54,20 +49,6 @@ struct UpdateSettingsView: View {
                     Text("自动下载并安装更新", tableName: "Updates")
                 }
                 .disabled(!updates.automaticallyChecksForUpdates)
-
-                Text(
-                    "默认仅手动检查。开启自动更新后，更新会在退出时安装；手动更新确认安装后会自动重启。更新前请保存正在编辑的内容。",
-                    tableName: "Updates"
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-                Text(
-                    "检查更新和下载仅连接 GitHub 发布服务，不发送订阅、付款、图片或备注。关闭自动检查后，日常使用不访问更新服务。",
-                    tableName: "Updates"
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
             } header: {
                 Text("更新偏好", tableName: "Updates")
             }
@@ -86,7 +67,6 @@ struct UpdateSettingsView: View {
                     Text("更新已准备好", tableName: "Updates")
                 }
             }
-
         }
         .formStyle(.grouped)
     }
@@ -95,7 +75,7 @@ struct UpdateSettingsView: View {
     private var availabilityDescription: some View {
         switch updates.availability {
         case .available:
-            Text("下载的更新经签名校验，安装完成后自动重新启动。", tableName: "Updates")
+            EmptyView()
         case .developmentBuild:
             Text("开发构建和样本模式不检查或安装正式版更新。", tableName: "Updates")
         case .invalidConfiguration:

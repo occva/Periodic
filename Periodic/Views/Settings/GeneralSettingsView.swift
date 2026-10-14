@@ -32,10 +32,6 @@ struct GeneralSettingsView: View {
                         Text(range.title).tag(range.rawValue)
                     }
                 }
-
-                Text("新窗口会使用此范围；当前窗口已选择的范围保持不变。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
 
             Section("语言与地区") {
@@ -57,18 +53,6 @@ struct GeneralSettingsView: View {
                 Toggle("使用货币符号", isOn: $usesCurrencySymbols)
                     .toggleStyle(.switch)
                     .accessibilityIdentifier("currency-symbol-toggle")
-
-                Text("关闭时显示 CNY 81.00；开启时显示 ¥81.00（人民币）。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Text("默认货币用于新建订阅和模板；汇率页可单独选择换算基准。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Text("货币显示只改变界面格式，不会修改已保存的币种或金额。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
 
             Section("菜单栏") {
@@ -86,10 +70,6 @@ struct GeneralSettingsView: View {
                 Toggle("显示预估金额", isOn: $menuBarShowsForecasts)
                     .toggleStyle(.switch)
                     .disabled(!menuBarEnabled)
-
-                Text("关闭菜单栏项目后，仍可从 Dock、Spotlight 或 Finder 打开 Periodic。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
 
             Section("系统通知") {

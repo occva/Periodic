@@ -42,11 +42,6 @@ struct TemplateLibraryView: View {
 
     var body: some View {
         libraryLayout
-        .searchable(
-            text: $searchText,
-            placement: .toolbar,
-            prompt: "搜索模板名称或别名"
-        )
         .onAppear { columnVisibility = .all }
         .frame(
             minWidth: presentation == .sheet ? 900 : 0,
@@ -104,11 +99,24 @@ struct TemplateLibraryView: View {
     private var libraryLayout: some View {
         switch presentation {
         case .sheet:
-            NavigationSplitView(columnVisibility: $columnVisibility) {
-                sidebar
-                    .navigationSplitViewColumnWidth(min: 210, ideal: 240, max: 280)
-            } detail: {
-                libraryDetail
+            VStack(spacing: 0) {
+                HStack(spacing: 12) {
+                    Text(selectionTitle)
+                        .font(.headline)
+                        .accessibilityAddTraits(.isHeader)
+                    Spacer()
+                    TemplateSearchField(text: $searchText)
+                        .frame(width: 220)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+
+                NavigationSplitView(columnVisibility: $columnVisibility) {
+                    sidebar
+                        .navigationSplitViewColumnWidth(min: 210, ideal: 240, max: 280)
+                } detail: {
+                    libraryDetail
+                }
             }
         case .embedded:
             NavigationStack {
@@ -119,6 +127,11 @@ struct TemplateLibraryView: View {
                     libraryDetail
                 }
             }
+            .searchable(
+                text: $searchText,
+                placement: .toolbar,
+                prompt: "搜索模板名称或别名"
+            )
         }
     }
 

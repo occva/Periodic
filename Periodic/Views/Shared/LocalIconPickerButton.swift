@@ -12,7 +12,7 @@ struct LocalIconPickerButton: View {
     @State private var importTask: Task<Void, Never>?
 
     var body: some View {
-        Button("本地图片…") {
+        Button("本地图片") {
             isPresentingFileImporter = true
         }
         .disabled(isImporting)
