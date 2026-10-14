@@ -295,6 +295,58 @@ struct SubscriptionAnalyticsTests {
         #expect(analytics.reminderItems(within: 15).map(\.name) == ["待确认", "即将到期"])
     }
 
+    @Test func dashboardMetricItemsMatchCardCountsAndStatusScope() {
+        let items = [
+            makeListItem(
+                makeInput(
+                    name: "有效周期",
+                    expiry: LocalDate(dayNumber: anchor.dayNumber + 1)
+                )
+            ),
+            makeListItem(
+                makeInput(
+                    name: "今天到期",
+                    expiry: anchor
+                )
+            ),
+            makeListItem(
+                makeInput(
+                    name: "有效终生",
+                    expiry: nil,
+                    billingKind: .lifetime
+                )
+            ),
+            makeListItem(
+                makeInput(
+                    name: "已过期",
+                    expiry: LocalDate(dayNumber: anchor.dayNumber - 1)
+                )
+            ),
+            makeListItem(
+                makeInput(
+                    name: "停用过期",
+                    expiry: LocalDate(dayNumber: anchor.dayNumber - 2),
+                    managementState: .inactive
+                )
+            ),
+            makeListItem(
+                makeInput(
+                    name: "日期未知",
+                    expiry: nil
+                )
+            ),
+        ]
+        let analytics = SubscriptionAnalytics(items: items, referenceDate: anchor)
+
+        #expect(analytics.effectiveItems.map(\.name) == ["今天到期", "有效周期", "有效终生"])
+        #expect(analytics.expiredItems.map(\.name) == ["已过期"])
+        #expect(
+            analytics.effectiveItems.count
+                == analytics.effectiveRecurringCount + analytics.effectiveLifetimeCount
+        )
+        #expect(analytics.expiredItems.count == analytics.expiredCount)
+    }
+
     @MainActor
     @Test func tableDefaultsToRemainingDaysFromPositiveToNegative() async throws {
         let services = AppServices(inMemory: true)
@@ -327,13 +379,22 @@ struct SubscriptionAnalyticsTests {
             name: "远期",
             expiry: LocalDate(dayNumber: today.dayNumber + 365)
         )
-        try await store.create([near, far])
+        let lifetime = makeInput(
+            name: "终生",
+            expiry: nil,
+            billingKind: .lifetime
+        )
+        try await store.create([near, far, lifetime])
 
         let session = WindowSession(referenceDate: today)
         session.dueHorizon = .thirtyDays
         await session.reload(using: services)
 
         #expect(session.dashboardActiveSubscriptionItems.map(\.name) == ["临期", "远期"])
+        #expect(
+            session.dashboardMetricItems(for: .effective).map(\.name)
+                == ["临期", "远期", "终生"]
+        )
         #expect(session.dashboardUpcomingItems.map(\.name) == ["临期"])
     }
 
@@ -417,11 +478,13 @@ struct SubscriptionAnalyticsTests {
 
     private func makeInput(
         name: String,
-        expiry: LocalDate,
+        expiry: LocalDate?,
         currency: CurrencyCode = .cny,
         category: ServiceCategory = .tools,
         reminderEnabled: Bool = true,
-        automaticallyRenews: Bool = false
+        automaticallyRenews: Bool = false,
+        managementState: ManagementState = .active,
+        billingKind: BillingKind = .recurring
     ) -> SubscriptionCreateInput {
         SubscriptionCreateInput(
             id: UUID(),
@@ -430,11 +493,13 @@ struct SubscriptionAnalyticsTests {
             iconResourceName: nil,
             iconURLString: nil,
             category: category,
-            managementState: .active,
-            billingKind: .recurring,
-            periodStart: LocalDate(dayNumber: expiry.dayNumber - 29),
+            managementState: managementState,
+            billingKind: billingKind,
+            periodStart: billingKind == .recurring
+                ? expiry.map { LocalDate(dayNumber: $0.dayNumber - 29) }
+                : nil,
             expiry: expiry,
-            cycleMonths: 1,
+            cycleMonths: billingKind == .recurring ? 1 : nil,
             money: Money(minorUnits: 1_000, currency: currency),
             note: "",
             reminderEnabled: reminderEnabled,

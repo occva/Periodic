@@ -1,0 +1,2 @@
+// Public key only. The corresponding private key stays in the login Keychain.
+SPARKLE_PUBLIC_ED_KEY = Pw4Ktio/wxOCuyAKgHf+oEUE0vUQcT/6u1PkguEqNK0=

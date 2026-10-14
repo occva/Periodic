@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		A11000000000000000000001 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = A11000000000000000000003 /* Sparkle */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		E529FEF9E3DFD484D216A7FD /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -20,6 +24,7 @@
 		2923ECD26F4C86D9F67EA938 /* PeriodicTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PeriodicTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		7810FACD1A7F55E5BD9A24EB /* Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
 		9D96675E1AE8F147742B656F /* Periodic.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Periodic.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A11000000000000000000004 /* Updates.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Updates.xcconfig; sourceTree = "<group>"; };
 		E7B1BFA482251F04722B6837 /* Periodic.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Periodic.entitlements; sourceTree = "<group>"; };
 		E91A5C65C2B08EF01D2456AF /* Base.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Base.xcconfig; sourceTree = "<group>"; };
 		E9E907FEF44498EF7DE7F1F7 /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
@@ -54,6 +59,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A11000000000000000000001 /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -90,6 +96,7 @@
 				E91A5C65C2B08EF01D2456AF /* Base.xcconfig */,
 				7810FACD1A7F55E5BD9A24EB /* Debug.xcconfig */,
 				E9E907FEF44498EF7DE7F1F7 /* Release.xcconfig */,
+				A11000000000000000000004 /* Updates.xcconfig */,
 				E7B1BFA482251F04722B6837 /* Periodic.entitlements */,
 			);
 			path = Configurations;
@@ -127,6 +134,9 @@
 				69F8D45498D7E20DA99BB780 /* Periodic */,
 			);
 			name = Periodic;
+			packageProductDependencies = (
+				A11000000000000000000003 /* Sparkle */,
+			);
 			productName = Periodic;
 			productReference = 9D96675E1AE8F147742B656F /* Periodic.app */;
 			productType = "com.apple.product-type.application";
@@ -179,6 +189,9 @@
 				Base,
 			);
 			mainGroup = E50290A24C49A459B43487C5;
+			packageReferences = (
+				A11000000000000000000002 /* XCRemoteSwiftPackageReference "Sparkle" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 328EC33DF3954DC9B83FA285 /* Products */;
 			projectDirPath = "";
@@ -358,6 +371,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		A11000000000000000000002 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = exactVersion;
+				version = 2.10.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A11000000000000000000003 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A11000000000000000000002 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 98F54143AB4E86B28C3AFEE0 /* Project object */;
 }

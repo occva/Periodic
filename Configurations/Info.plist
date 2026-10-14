@@ -24,6 +24,26 @@
     <string>public.app-category.utilities</string>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
+    <key>SUFeedURL</key>
+    <string>https://github.com/occva/Periodic/releases/latest/download/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>$(SPARKLE_PUBLIC_ED_KEY)</string>
+    <key>SUEnableInstallerLauncherService</key>
+    <true/>
+    <key>SUEnableAutomaticChecks</key>
+    <false/>
+    <key>SUAutomaticallyUpdate</key>
+    <false/>
+    <key>SUAllowsAutomaticUpdates</key>
+    <true/>
+    <key>SUEnableSystemProfiling</key>
+    <false/>
+    <key>SUVerifyUpdateBeforeExtraction</key>
+    <true/>
+    <key>SURequireSignedFeed</key>
+    <true/>
+    <key>SUSignedFeedFailureExpirationInterval</key>
+    <integer>0</integer>
     <key>UTExportedTypeDeclarations</key>
     <array>
         <dict>

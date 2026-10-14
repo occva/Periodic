@@ -207,6 +207,30 @@ struct ContentView: View {
                 }
             )
         }
+        .sheet(
+            item: Binding(
+                get: { session.dashboardMetricScope },
+                set: { scope in
+                    if scope == nil {
+                        session.dismissDashboardMetricList()
+                    }
+                }
+            ),
+            onDismiss: { session.dismissDashboardMetricList() }
+        ) { scope in
+            DashboardMetricDrilldownView(
+                scope: scope,
+                items: session.dashboardMetricItems(for: scope),
+                referenceDate: session.referenceDate,
+                onDetails: { id in
+                    session.dismissDashboardMetricList()
+                    Task { @MainActor in
+                        await Task.yield()
+                        session.presentDetails(for: id)
+                    }
+                }
+            )
+        }
         .task {
             await session.loadInitialData(using: services)
             applyPendingWindowRoute()

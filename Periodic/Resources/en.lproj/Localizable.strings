@@ -150,6 +150,7 @@
 
 "全部项目" = "All";
 "已过期" = "Expired";
+"暂无已过期订阅" = "No expired subscriptions";
 "终生" = "Lifetime";
 "不分组" = "No Grouping";
 "按服务类型" = "By Service Type";
@@ -177,6 +178,9 @@
 "概况" = "Overview";
 "全库总数" = "Total";
 "当前有效" = "Active";
+"暂无当前有效订阅" = "No active subscriptions";
+"记录变化后，列表会与首页数量同步更新。" = "This list stays in sync with the dashboard count as records change.";
+"共 %d 项" = "%d items";
 "预估费用" = "Estimated Cost";
 "暂无费用数据" = "No cost data";
 "即将到期" = "Upcoming";
@@ -226,6 +230,7 @@
 "到期时间" = "Expiration";
 "剩余时长" = "Remaining";
 "账户状态" = "Account Status";
+"当前价格" = "Current Price";
 "消费金额" = "Amount";
 "按月计算" = "Monthly";
 "按年计算" = "Annual";

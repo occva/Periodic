@@ -2,10 +2,19 @@ import SwiftUI
 
 @main
 struct PeriodicApp: App {
-    @State private var services = AppServices()
+    @State private var services: AppServices
+    @State private var updates: AppUpdateService
     @State private var menuBarFeature = MenuBarFeature()
     @State private var windowRouter = AppWindowRouter()
     @AppStorage(PreferenceKey.menuBarEnabled) private var menuBarEnabled = true
+
+    init() {
+        let services = AppServices()
+        _services = State(initialValue: services)
+        _updates = State(initialValue: AppUpdateService(
+            terminationGuard: services.terminationGuard
+        ))
+    }
 
     var body: some Scene {
         WindowGroup(AppConfiguration.displayName, id: AppConfiguration.mainWindowID) {
@@ -20,7 +29,7 @@ struct PeriodicApp: App {
         .defaultSize(width: 1280, height: 800)
         .windowResizability(.contentMinSize)
         .commands {
-            AppCommands()
+            AppCommands(updates: updates)
             SidebarCommands()
         }
 
@@ -42,6 +51,7 @@ struct PeriodicApp: App {
         Settings {
             SettingsView()
                 .environment(services)
+                .environment(updates)
                 .environment(\.appleIconCache, services.appleIconCache)
                 .modifier(AppearanceModifier())
                 .modifier(LocalizationModifier())

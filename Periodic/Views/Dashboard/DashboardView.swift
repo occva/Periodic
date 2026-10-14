@@ -76,7 +76,8 @@ struct DashboardView: View {
                     value: "\(analytics.effectiveRecurringCount + analytics.effectiveLifetimeCount)",
                     detail: "周期 \(analytics.effectiveRecurringCount) · 终生 \(analytics.effectiveLifetimeCount)",
                     symbol: "checkmark.circle",
-                    valueAccessibilityIdentifier: "dashboard-active-count"
+                    valueAccessibilityIdentifier: "dashboard-active-count",
+                    action: { session.presentDashboardMetricList(.effective) }
                 )
                 SummaryMetricCard(
                     title: "本月预估",
@@ -84,7 +85,12 @@ struct DashboardView: View {
                     symbol: "banknote"
                 )
                 .help(monthlyForecastHelp)
-                SummaryMetricCard(title: "已过期", value: "\(analytics.expiredCount)", symbol: "exclamationmark.circle")
+                SummaryMetricCard(
+                    title: "已过期",
+                    value: "\(analytics.expiredCount)",
+                    symbol: "exclamationmark.circle",
+                    action: { session.presentDashboardMetricList(.expired) }
+                )
                 SummaryMetricCard(
                     title: "待续费",
                     value: "\(session.automaticRenewalDueItems.count)",

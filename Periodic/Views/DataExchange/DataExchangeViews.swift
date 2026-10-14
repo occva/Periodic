@@ -185,7 +185,11 @@ struct DataExchangePresentationModifier: ViewModifier {
                 allowedContentTypes: [.periodicDataPackage],
                 allowsMultipleSelection: false
             ) { result in
-                feature.inspect(result, using: services.dataExchange)
+                feature.inspect(
+                    result,
+                    using: services.dataExchange,
+                    terminationGuard: services.terminationGuard
+                )
             }
             .fileExporter(
                 isPresented: $feature.isPresentingExporter,
@@ -202,7 +206,12 @@ struct DataExchangePresentationModifier: ViewModifier {
                         preview: preview,
                         isPreparing: feature.isBusy,
                         onCancel: { feature.isPresentingExportPreview = false },
-                        onConfirm: { feature.confirmExport(using: services.dataExchange) }
+                        onConfirm: {
+                            feature.confirmExport(
+                                using: services.dataExchange,
+                                terminationGuard: services.terminationGuard
+                            )
+                        }
                     )
                 }
             }
@@ -218,6 +227,7 @@ struct DataExchangePresentationModifier: ViewModifier {
                         onConfirm: {
                             feature.confirmImport(
                                 using: services.dataExchange,
+                                terminationGuard: services.terminationGuard,
                                 onImported: onImported
                             )
                         }

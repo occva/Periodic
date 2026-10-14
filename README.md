@@ -7,7 +7,7 @@
 
 集中管理软件订阅、会员服务与终生购买，清楚看到何时到期、每月大约花多少，以及实际支付过什么。
 
-macOS 26+ · 简体中文 / English
+macOS 26+ · 简体中文 / English · 1.0.0
 
 </div>
 
@@ -60,14 +60,26 @@ Periodic 无需账号，日常使用无需联网。
 
 - 订阅、付款历史、自定义模板和图片均保存在本地。
 - 不包含遥测或广告，不会读取银行账单，也不会代替用户发起付款。
-- 只有在你主动搜索品牌图标或使用汇率换算时才会联网；请求不会包含订阅名称、金额或备注。
+- 主动搜索品牌图标、使用汇率换算或检查应用更新时会联网；可在“设置 > 更新”中选择自动检查与自动安装。更新自动检查默认关闭，请求不会包含订阅名称、金额或备注。
 - 导入与导出通过系统文件选择器完成；`.periodicdata` 数据包未加密，请像保护账单一样妥善保管。
 
 当前版本不提供 iCloud 同步或 AI 助手。
 
 ## 安装与运行
 
-当前仓库提供源码构建方式，暂未发布经过签名和公证的安装包。
+正式安装包通过 [GitHub Releases](https://github.com/occva/Periodic/releases/latest) 分发，文件名为 `Periodic-1.0.0.dmg`，仅支持 Apple silicon（arm64），要求 macOS 26 或更新版本。
+
+打开 DMG，将 Periodic 拖入旁边的 Applications（应用程序），再从“应用程序”启动并推出磁盘映像。安装窗口只有应用图标、目标文件夹和拖拽提示。
+
+1.0.0 使用临时代码签名，未经 Apple 公证。如果首次打开被系统阻止，在确认下载来自本仓库后，可在终端执行：
+
+```bash
+xattr -rd com.apple.quarantine /Applications/Periodic.app
+```
+
+如果提示权限不足，使用 `sudo xattr -rd com.apple.quarantine /Applications/Periodic.app` 后重新打开。此操作只移除下载隔离标记，不会为应用增加 Developer ID 签名或公证。应用不会自动执行此命令。
+
+在 Periodic 菜单选择“检查更新…”可下载新版本，确认安装后自动重启。打开的编辑弹窗会延后重启，保存或取消并关闭后才继续。更新或替换应用保留本地数据，建议先在“设置 > 数据”导出备份。
 
 ### 系统要求
 
@@ -111,6 +123,7 @@ Periodic 使用 Swift 6 严格并发检查，界面基于 SwiftUI 和 macOS 26 L
 - [产品需求](docs/requirement.md)
 - [架构说明](docs/architecture.md)
 - [实现设计](docs/implementation/)
+- [版本管理与发布](docs/releases/README.md)
 
 ## 许可
 

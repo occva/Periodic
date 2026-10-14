@@ -62,6 +62,21 @@ struct SubscriptionAnalytics: Sendable {
     var inactiveCount: Int { count(for: .inactive) }
     var unknownDateCount: Int { count(for: .unknownDate) }
 
+    var effectiveItems: [SubscriptionListItem] {
+        items
+            .filter {
+                let bucket = status(of: $0)
+                return bucket == .effectiveRecurring || bucket == .effectiveLifetime
+            }
+            .sorted(by: expiryAscending)
+    }
+
+    var expiredItems: [SubscriptionListItem] {
+        items
+            .filter { status(of: $0) == .expired }
+            .sorted(by: expiryAscending)
+    }
+
     var classifiedCount: Int {
         SubscriptionStatusBucket.allCases.reduce(0) { $0 + count(for: $1) }
     }

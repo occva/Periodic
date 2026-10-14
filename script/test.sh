@@ -9,6 +9,9 @@ RESULT_DIRECTORY="$PROJECT_ROOT/build/TestResults"
 if [[ "$MODE" == "--performance" ]]; then
   exec "$PROJECT_ROOT/script/performance.sh" "${@:2}"
 fi
+if [[ "$MODE" == "--release" ]]; then
+  exec python3 -m unittest discover -s "$PROJECT_ROOT/Tests/ReleaseTests"
+fi
 
 latest_result() {
   local latest=""
@@ -63,7 +66,7 @@ case "$MODE" in
     printf '  %s\n' "${TEST_FILTER[@]#-only-testing:}"
     ;;
   *)
-    echo "usage: $0 [unit|--failed [result.xcresult]|--performance]" >&2
+    echo "usage: $0 [unit|--failed [result.xcresult]|--performance|--release]" >&2
     exit 2
     ;;
 esac

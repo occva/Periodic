@@ -7,3 +7,5 @@ xcuserdata/
 *.xcresult/
 *.log
 .swiftpm/
+__pycache__/
+*.py[cod]

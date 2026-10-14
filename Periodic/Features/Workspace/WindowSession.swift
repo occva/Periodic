@@ -28,6 +28,7 @@ final class WindowSession {
     private(set) var isPresentingSubscriptionDetail = false
     private(set) var isPresentingTemplateLibrary = false
     private(set) var isPresentingReminderCenter = false
+    private(set) var dashboardMetricScope: DashboardMetricScope?
     private(set) var reminderCenterScope = SubscriptionReminderScope.all
     private(set) var editingSubscriptionID: UUID?
     private(set) var editingSubscription: SubscriptionDTO?
@@ -116,6 +117,15 @@ final class WindowSession {
             .sorted(by: expiryAscending)
     }
 
+    func dashboardMetricItems(for scope: DashboardMetricScope) -> [SubscriptionListItem] {
+        switch scope {
+        case .effective:
+            analytics.effectiveItems
+        case .expired:
+            analytics.expiredItems
+        }
+    }
+
     var automaticRenewalDueItems: [SubscriptionListItem] {
         analytics.automaticRenewalDueItems
     }
@@ -168,6 +178,14 @@ final class WindowSession {
 
     func dismissReminderCenter() {
         isPresentingReminderCenter = false
+    }
+
+    func presentDashboardMetricList(_ scope: DashboardMetricScope) {
+        dashboardMetricScope = scope
+    }
+
+    func dismissDashboardMetricList() {
+        dashboardMetricScope = nil
     }
 
     func renewalPreview(for id: UUID) -> SubscriptionRenewalPreview? {

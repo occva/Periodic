@@ -6,6 +6,7 @@ import SwiftData
 @MainActor
 @Observable
 final class AppServices {
+    let terminationGuard = ApplicationTerminationGuard()
     let persistence: PersistenceController
     let subscriptionStore: SubscriptionStore?
     let templateStore: TemplateStore?

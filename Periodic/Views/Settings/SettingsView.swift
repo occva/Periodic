@@ -11,6 +11,15 @@ struct SettingsView: View {
 
             DataSettingsView()
                 .tabItem { Label("数据", systemImage: "externaldrive") }
+
+            UpdateSettingsView()
+                .tabItem {
+                    Label {
+                        Text("更新", tableName: "Updates")
+                    } icon: {
+                        Image(systemName: "arrow.down.circle")
+                    }
+                }
         }
         .frame(width: 640, height: 560)
         .onAppear {
@@ -22,4 +31,5 @@ struct SettingsView: View {
 #Preview {
     SettingsView()
         .environment(AppServices(inMemory: true))
+        .environment(AppUpdateService())
 }

@@ -5,6 +5,57 @@ import Testing
 
 @MainActor
 struct WindowSessionTests {
+    @Test func dashboardMetricPresentationDoesNotChangeOverviewFilters() {
+        let session = WindowSession()
+        session.quickView = .inactive
+        session.searchText = "工具"
+        session.overviewManagementState = .active
+        session.overviewExpiryFilter = .unknownDate
+        session.overviewCategory = .tools
+        session.overviewBillingKind = .recurring
+        session.overviewCurrency = .usd
+
+        session.presentDashboardMetricList(.effective)
+
+        #expect(session.dashboardMetricScope == .effective)
+        #expect(session.quickView == .inactive)
+        #expect(session.searchText == "工具")
+        #expect(session.overviewManagementState == .active)
+        #expect(session.overviewExpiryFilter == .unknownDate)
+        #expect(session.overviewCategory == .tools)
+        #expect(session.overviewBillingKind == .recurring)
+        #expect(session.overviewCurrency == .usd)
+
+        session.dismissDashboardMetricList()
+
+        #expect(session.dashboardMetricScope == nil)
+        #expect(session.quickView == .inactive)
+        #expect(session.searchText == "工具")
+        #expect(session.overviewExpiryFilter == .unknownDate)
+    }
+
+    @Test func dashboardMetricListStaysOpenAndRefreshesWithSubscriptionData() async throws {
+        let services = AppServices(inMemory: true)
+        let store = try #require(services.subscriptionStore)
+        let today = LocalDate.today
+        let input = makeInput(name: "Active", state: .active, expiry: today)
+        _ = try await store.create(input)
+        let session = WindowSession(referenceDate: today)
+        await session.reload(using: services)
+        session.presentDashboardMetricList(.effective)
+
+        #expect(session.dashboardMetricItems(for: .effective).map(\.name) == ["Active"])
+
+        try await store.setManagementState(.inactive, for: [
+            SubscriptionMutationTarget(id: input.id, expectedRevision: 1),
+        ])
+        await session.reload(using: services)
+
+        #expect(session.dashboardMetricScope == .effective)
+        #expect(session.dashboardMetricItems(for: .effective).isEmpty)
+        #expect(session.analytics.effectiveRecurringCount == 0)
+    }
+
     @Test func deletedTargetClosesDetailsAndKeepsEditorIdentity() async throws {
         let services = AppServices(inMemory: true)
         let store = try #require(services.subscriptionStore)

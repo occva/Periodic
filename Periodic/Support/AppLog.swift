@@ -10,4 +10,9 @@ enum AppLog {
         subsystem: AppConfiguration.subsystem,
         category: "Persistence"
     )
+
+    static let updates = Logger(
+        subsystem: AppConfiguration.subsystem,
+        category: "Updates"
+    )
 }

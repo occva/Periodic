@@ -25,6 +25,8 @@ Stores ─────────────→ Models、Schema
 - `Views/`：按功能分目录；页面根视图、专用组件、布局和草稿类型就近放置。
 - `Resources/`：本地化、Asset Catalog、内置目录和图标资源。
 - `Tests/`：单元测试，目录名称与被测职责对应。
+- `Configurations/`：构建、沙盒、版本与更新公钥；不保存发布私钥或 Apple 凭据。
+- `script/`：构建、测试、DMG 安装窗口与版本发布入口。
 
 ## 文件组织约定
 
@@ -67,6 +69,8 @@ Store 的数据库操作保持同步 actor 方法，检查 revision/digest、修
 每批结构调整后运行现有单元测试；完成后运行完整测试和 Debug 构建。
 
 ## 可选扩展
+
+应用版本更新由 App 入口单独装配 `AppUpdateService`，菜单与设置共享此实例。Sparkle 只存在于更新服务的系统适配边界，版本配置和重启条件保持纯值规则；更新不读写业务数据库。发布与安装流程见 [版本管理与发布](releases/README.md)。
 
 需要独立架构边界或详细补充的设计放在 [扩展功能规格](extensions/README.md)：
 

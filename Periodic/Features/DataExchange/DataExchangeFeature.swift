@@ -36,13 +36,20 @@ final class DataExchangeFeature {
         }
     }
 
-    func requestExport(using service: DataExchangeService?) {
+    func requestExport(
+        using service: DataExchangeService?,
+        terminationGuard: ApplicationTerminationGuard? = nil
+    ) {
         guard let service else {
             error = PresentedError(DataExchangeError.storeUnavailable, title: "无法导出数据")
             return
         }
+        let operation = terminationGuard?.beginOperation()
         phase = .preparingExport
         Task {
+            defer {
+                if let operation { terminationGuard?.endOperation(operation) }
+            }
             do {
                 exportPreview = try await service.previewExport()
                 phase = .awaitingExportConfirmation
@@ -53,14 +60,21 @@ final class DataExchangeFeature {
         }
     }
 
-    func confirmExport(using service: DataExchangeService?) {
+    func confirmExport(
+        using service: DataExchangeService?,
+        terminationGuard: ApplicationTerminationGuard? = nil
+    ) {
         guard let service else {
             error = PresentedError(DataExchangeError.storeUnavailable, title: "无法导出数据")
             return
         }
+        let operation = terminationGuard?.beginOperation()
         isPresentingExportPreview = false
         phase = .preparingExport
         Task {
+            defer {
+                if let operation { terminationGuard?.endOperation(operation) }
+            }
             do {
                 let package = try await service.prepareExport()
                 exportDocument = PeriodicDataPackageDocument(package: package)
@@ -93,7 +107,11 @@ final class DataExchangeFeature {
         isPresentingImporter = true
     }
 
-    func inspect(_ result: Result<[URL], Error>, using service: DataExchangeService?) {
+    func inspect(
+        _ result: Result<[URL], Error>,
+        using service: DataExchangeService?,
+        terminationGuard: ApplicationTerminationGuard? = nil
+    ) {
         isPresentingImporter = false
         switch result {
         case .success(let urls):
@@ -103,8 +121,12 @@ final class DataExchangeFeature {
                 }
                 return
             }
+            let operation = terminationGuard?.beginOperation()
             phase = .reading
             Task {
+                defer {
+                    if let operation { terminationGuard?.endOperation(operation) }
+                }
                 do {
                     importPlan = try await service.inspect(url: url)
                     conflictResolution = .keepLocal
@@ -125,6 +147,7 @@ final class DataExchangeFeature {
 
     func confirmImport(
         using service: DataExchangeService?,
+        terminationGuard: ApplicationTerminationGuard? = nil,
         onImported: @escaping @MainActor () async -> Void
     ) {
         guard let service, let importPlan else {
@@ -142,12 +165,16 @@ final class DataExchangeFeature {
             self.error = PresentedError(error, title: "请检查分类名称")
             return
         }
+        let operation = terminationGuard?.beginOperation()
         isPresentingImportPreview = false
         phase = .importing
         let selectedResolution = conflictResolution
         let selectedSettings = importsSettings
         let selectedCategoryNames = categoryNameOverrides
         Task {
+            defer {
+                if let operation { terminationGuard?.endOperation(operation) }
+            }
             do {
                 let receipt = try await service.execute(
                     plan: importPlan,

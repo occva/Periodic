@@ -34,7 +34,11 @@ enum AppLanguage: String, CaseIterable, Identifiable {
 
 enum AppLocalization {
     static func string(_ key: String) -> String {
-        activeBundle.localizedString(forKey: key, value: key, table: nil)
+        string(key, table: nil)
+    }
+
+    static func string(_ key: String, table: String?) -> String {
+        activeBundle.localizedString(forKey: key, value: key, table: table)
     }
 
     static var activeLanguageIdentifier: String {
